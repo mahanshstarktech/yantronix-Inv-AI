@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+requests
+beautifulsoup4
+openai
+ollama
+psycopg2-binary
