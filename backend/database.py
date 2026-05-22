@@ -1,70 +1,69 @@
-import psycopg2 #PostgreSQL database adapter for Python
+import psycopg2
 import json
+import os
+from typing import Optional
+from dotenv import load_dotenv
 
-conn = psycopg2.connect( #Later make a connection pool as FastAPI runs multiple workers, connection may crash
-    dbname="scraper_db",
-    user="mahanshgaur",
-    host="localhost",
-    port="5432"
+load_dotenv()
+
+# ── DB config ────────────────────────────────────────────────────────────────
+# Reads from environment variables if present, falls back to local defaults.
+DB_CONFIG = dict(
+    dbname = os.getenv("DB_NAME", "scraper_db"),
+    user   = os.getenv("DB_USER", "mahanshgaur"),
+    host   = os.getenv("DB_HOST", "localhost"),
+    port   = os.getenv("DB_PORT", "5432"),
 )
 
-def save_raw_product(product_data, url):
-    
-    cur = conn.cursor() #A cursor is an object used to run SQL commands.
-                        #Think of it like a remote control for the database.
+def get_conn():
+    """Open a fresh connection. Always close it after use."""
+    return psycopg2.connect(**DB_CONFIG)
 
-    cur.execute(
-        """
-        INSERT INTO raw_products (
-            source_url,
-            vendor,
-            data
+
+def save_raw_product(product_data: dict, url: str) -> int:
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO raw_products (source_url, vendor, data)
+            VALUES (%s, %s, %s)
+            RETURNING id
+            """,
+            (url, product_data["vendor"], json.dumps(product_data))
         )
-        VALUES (%s, %s, %s)
-        RETURNING id
-        """,
-        #These are placeholders.
-        #Why not write values directly?
-        #Bad practice:
-        #VALUES ('url', 'Quartz', '{...}')
-        #Because of SQL injection risk.
+        product_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        return product_id
+    finally:
+        conn.close()
 
-        (
-            #These values replace the %s placeholders.
-            url,
-            product_data["vendor"],
-            json.dumps(product_data)
+
+def save_ai_product(raw_product_id: int, ai_data: dict) -> None:
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO ai_products (raw_product_id, ai_data)
+            VALUES (%s, %s)
+            """,
+            (raw_product_id, json.dumps(ai_data))
         )
-    )
+        conn.commit()
+        cur.close()
+    finally:
+        conn.close()
 
-    product_id = cur.fetchone()[0] #Fetch one row from query result.
-    conn.commit() #save permanently
 
-    cur.close()
-
-    return product_id
-
-def save_ai_product(raw_product_id, ai_data):
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO ai_products (
-            raw_product_id, 
-            ai_data
-        )
-        VALUES (%s, %s)
-        """,
-        (
-            raw_product_id,
-            json.dumps(ai_data)
-        )
-    )
-    conn.commit()
-    cur.close()
-
-def get_raw_product(product_id):
-    cur = conn.cursor()
-    cur.execute("SELECT data FROM raw_products WHERE id = %s", (product_id,))
-    row = cur.fetchone()
-    cur.close()
-    return row[0] if row else None
+def get_raw_product(product_id: int) -> Optional[dict]:
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT data FROM raw_products WHERE id = %s", (product_id,))
+        row = cur.fetchone()
+        cur.close()
+        return row[0] if row else None
+    finally:
+        conn.close()

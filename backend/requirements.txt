@@ -2,6 +2,8 @@ fastapi
 uvicorn
 requests
 beautifulsoup4
-openai
-ollama
 psycopg2-binary
+google-genai
+python-dotenv
+celery
+redis

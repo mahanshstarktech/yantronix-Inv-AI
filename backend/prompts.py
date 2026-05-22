@@ -2,21 +2,37 @@ import json
 def build_ai_prompt(product: dict) -> str:
     """
     Build a structured prompt for AI content generation.
-    'product' dict should contain at minimum:
-        - name         : str
-        - description  : str  (raw page text or scraped description)
-        - price        : float (Quartz base price in INR)
-        - sku          : str
-        - specs        : dict or str (raw specs from page)
+    Reads from the actual shape produced by extract_quartz_product() in main.py:
+        - title          : str
+        - vendor_sku     : str
+        - description_raw: str
+        - specifications : dict
+        - pricing.base_price    : float
+        - pricing.selling_price : float
     """
 
-    quartz_price    = float(product.get("price", 0))
-    selling_price   = round(quartz_price * 1.18 * 1.05, 2)
+    # ── Read fields using the ACTUAL keys from the scraper ──────────────
+    pricing       = product.get("pricing") or {}
+    quartz_price  = float(pricing.get("base_price") or 0)
 
-    name        = product.get("name", "")
-    sku         = product.get("sku", "")
-    description = product.get("description", "")
-    specs       = product.get("specs", "")
+    # Use the already-calculated selling price from the scraper.
+    # Fall back to the formula only if the stored value is missing.
+    selling_price = float(
+        pricing.get("selling_price")
+        or round(quartz_price * 1.18 * 1.05, 2)
+    )
+
+    name          = product.get("title", "")
+    sku           = product.get("vendor_sku", "")
+    description   = product.get("description_raw", "")
+    
+    # specifications is a dict — convert to readable lines for the prompt
+    specs_raw = product.get("specifications", "")
+    if isinstance(specs_raw, dict):
+        specs = "\n".join(f"{k}: {v}" for k, v in specs_raw.items())
+    else:
+        specs = str(specs_raw)
+    
 
     prompt = f"""
 You are a professional electronics product data extractor and e-commerce listing generator.

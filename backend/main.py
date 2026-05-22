@@ -2,6 +2,11 @@
 #Standard Library
 import json
 import re
+import os
+
+#Load .env file
+from dotenv import load_dotenv
+load_dotenv()
 
 #Third-party
 import requests #This is how python open websites
@@ -59,11 +64,12 @@ def detect_vendors(url: HttpUrl) -> str:
 # Pricing Engine
 # -----------------------------    
 def calculate_prices(base_price: float, vendor: str) -> dict:
+    vendor_lower = vendor.lower()
 
-    if vendor == "Quartz":
+    if vendor_lower == "quartz":
         selling_price = base_price * 1.18 * 1.05
     
-    elif vendor == "Robu":
+    elif vendor_lower == "robu":
         selling_price = base_price * 1.05
 
     else:
@@ -91,7 +97,7 @@ def extract_quartz_product(soup: BeautifulSoup) -> dict:
     #price
     price_tag = soup.select_one("span.price-item--regular")
     price = clean_price(price_tag.text) if price_tag else 0
-    pricing = calculate_prices(price, "Quartz") if price else{
+    pricing = calculate_prices(price, "quartz") if price else{
         "base_price": None,
         "selling_price": None,
         "retail_price": None
@@ -184,7 +190,7 @@ def extract_quartz_product(soup: BeautifulSoup) -> dict:
 
      # -------- RETURN --------
     return {
-        "vendor": "Quartz",
+        "vendor": "quartz",
         "title": title,
         "vendor_sku": sku,
         "availability": availability,
@@ -209,16 +215,21 @@ def extract_website(data: ExtractRequest): #ExtractRequest -> FastAPI automatica
         #Step1: Fetch webpage
         response = requests.get(
             str(data.url),
-            headers = {
-                "User-Agent": "Mozilla/5.0" #Many sites block bots so we used "User-Agent"
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
             },
-            timeout=10 #Prevent server hanging forever
+            timeout=10
         )
 
         if response.status_code != 200:
             raise HTTPException(
-                status_code = 400, 
-                detail = "Failed to fetch page"
+                status_code=400,
+                detail=f"Failed to fetch page — site returned {response.status_code}"
             )
         
         soup = BeautifulSoup(response.text, "html.parser")
@@ -248,6 +259,9 @@ def extract_website(data: ExtractRequest): #ExtractRequest -> FastAPI automatica
             status_code=408,
             detail="Request timed out or failed"
         )
+
+    except HTTPException:
+        raise  # Re-raise 400/404/etc. as-is — don't let them become 500s
     
     except Exception as e:
         raise HTTPException(
