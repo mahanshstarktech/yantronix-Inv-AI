@@ -1,5 +1,0 @@
-Redis:
-redis-server
-
-Celery:
-celery -A tasks worker --loglevel=info
