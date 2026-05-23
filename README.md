@@ -297,9 +297,9 @@ refactor: move prompt builder to separate file
 - [ ] Support for additional vendors (Robu full integration, mouser.in, evelta.com)
 - [ ] Webhook or polling endpoint to check job status by `product_id`
 - [ ] Admin panel to review and edit AI output before publishing
-
+<!-- 
 ---
 
 ## License
 
-Add your preferred license here.
+Add your preferred license here. -->
