@@ -1,212 +1,305 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Yantronix AI Product Scraper
 
-## Getting Started
+An automated e-commerce product pipeline for Yantronix. Paste a supplier product page URL — the system fetches it, converts the HTML to clean text, sends it to Gemini AI, and generates a fully structured, SEO-optimized product listing ready for Zoho Commerce.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## How It Works
+
+```
+Product URL (POST /extract)
+        │
+        ▼
+FastAPI fetches page (requests)
+        │
+        ▼
+HTML → clean plain text (BeautifulSoup)
+        │
+        ▼
+PostgreSQL  ←──  raw_products saved
+        │
+        ▼
+Celery task queued (Redis broker)
+        │
+        ▼
+Gemini 2.5 Flash extracts + generates listing
+        │
+        ▼
+PostgreSQL  ←──  ai_products saved
+        │
+        ▼
+Zoho Commerce payload built + published
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Generated Output (per product)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Every product URL produces the following structured data:
 
-## Learn More
+| Field | Description |
+|---|---|
+| `product_title` | Full descriptive title with chip name, interface, and use case |
+| `seo_title` | 60–70 character keyword-rich SEO title |
+| `meta_description` | 150–160 character meta with specs and CTA |
+| `seo_description` | 2–3 sentence paragraph for the product page |
+| `hsn_code` | 6-digit GST HSN code |
+| `sku` | Extracted or inferred SKU |
+| `weight_kg` | Weight in kilograms |
+| `dimensions_cm` | L × W × H in centimetres |
+| `selling_price` | Breakdown: base → after GST (×1.18) → after margin (×1.05) |
+| `tags` | 20+ tags covering chip, interface, use case, platform, audience |
+| `seo_keywords` | 25+ flat keyword list: short-tail, long-tail, buy/shop phrases |
+| `short_description_html` | HTML `<ul>` spec list with intro paragraph |
+| `long_description_html` | Full HTML: Overview, Specs table, How It Works, Pin Description, Compatible Platforms, Applications, Assembly Tips, Sample Code, Package Contents, Safety Warning |
 
-To learn more about Next.js, take a look at the following resources:
+---
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Project Structure
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-
-# Yantronix AI Web Scraper
-
-An AI-powered product scraping pipeline for Yantronix.  
-It takes a product page URL, extracts structured product data, cleans it, sends it to a local AI model for listing generation, stores the result in PostgreSQL, and prepares the output for publishing to Zoho Commerce.
-
-## What this project currently does
-
-1. Accepts a product URL through a FastAPI endpoint.
-2. Scrapes the product page with `requests` + `BeautifulSoup`.
-3. Extracts Quartz-specific product details such as:
-   - title
-   - price
-   - SKU
-   - availability
-   - description
-   - specifications
-   - image URLs
-4. Saves the raw scraped product to PostgreSQL.
-5. Queues an AI generation job with Celery + Redis.
-6. Sends the scraped content to Ollama (`llama3.1:8b`) to generate:
-   - SEO title
-   - meta description
-   - HSN code
-   - tags
-   - SEO keywords
-   - HTML descriptions
-   - selling price details
-7. Stores the AI-generated output in PostgreSQL.
-8. Builds a Zoho Commerce payload and prints it in test mode, or posts it in real mode.
-
-## Current architecture
-
-```text
-Frontend / API client
-        |
-        v
-FastAPI `/extract`
-        |
-        v
-Quartz scraper (BeautifulSoup + requests)
-        |
-        v
-PostgreSQL `raw_products`
-        |
-        v
-Celery task queue (Redis broker)
-        |
-        v
-Ollama AI generation
-        |
-        v
-PostgreSQL `ai_products`
-        |
-        v
-Zoho payload builder / publish step
+```
+yantronix-scraper/
+├── main.py          # FastAPI app — URL ingestion, HTML→text, vendor detection
+├── tasks.py         # Celery background task — orchestrates the full pipeline
+├── ai_generator.py  # Gemini 2.5 Flash API call and JSON parsing
+├── prompts.py       # Prompt builder — feeds raw text + pricing to Gemini
+├── database.py      # PostgreSQL helpers — save/load raw and AI products
+├── publish.py       # Zoho Commerce payload builder and publisher
+├── celery_app.py    # Celery + Redis configuration
+├── peek.py          # CLI tool to inspect generated output in the database
+├── requirements.txt # Python dependencies
+└── .env             # API keys and config (never commit this)
 ```
 
-## Main files
+---
 
-- `main.py` — FastAPI app and Quartz scraping logic
-- `database.py` — PostgreSQL save/load helpers
-- `tasks.py` — Celery background job
-- `celery_app.py` — Celery + Redis config
-- `prompts.py` — AI prompt builder
-- `ai_generator.py` — Ollama call and JSON parsing
-- `publish.py` — Zoho payload builder and publisher
-- `peek.py` — debug script to inspect stored AI output
-- `requirements.txt` — Python dependencies
-- `what_to_run.txt` — quick run notes
+## Local Setup
 
-## Features already implemented
+### Prerequisites
 
-### 1. Scraper API
-A FastAPI endpoint receives a product URL and starts the scraping flow.
+- Python 3.10+
+- PostgreSQL (local or remote)
+- Redis
+- A Gemini API key ([get one here](https://aistudio.google.com/app/apikey))
 
-### 2. Quartz extraction
-Quartz product pages are parsed for title, price, SKU, availability, descriptions, specs, and images.
+### 1. Clone and install
 
-### 3. Database storage
-Raw product data and AI-generated data are stored separately in PostgreSQL.
-
-### 4. Background processing
-Celery runs the AI generation job asynchronously so the API does not block.
-
-### 5. AI content generation
-A local Ollama model generates SEO-friendly e-commerce content in JSON format.
-
-### 6. Zoho payload preparation
-The generated data is mapped into a Zoho Commerce product payload.
-
-## What is still in progress
-
-- Vendor support is currently Quartz-only.
-- The AI prompt and raw scraper data shape still need to be aligned cleanly.
-- The publish step is in test mode by default.
-- Better validation, logging, and error handling can still be added.
-- A proper frontend upload UI can be connected later.
-
-## Local setup
-
-### 1. Install dependencies
 ```bash
+git clone https://github.com/your-username/yantronix-scraper.git
+cd yantronix-scraper
 pip install -r requirements.txt
 ```
 
-### 2. Start Redis
+### 2. Configure environment
+
+Create a `.env` file in the project root:
+
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+DB_NAME=scraper_db
+DB_USER=your_postgres_username
+DB_HOST=localhost
+DB_PORT=5432
+TEST_MODE=true
+ZOHO_TOKEN=             # leave blank until you are ready to publish
+```
+
+### 3. Set up the PostgreSQL database
+
+```sql
+CREATE DATABASE scraper_db;
+
+CREATE TABLE raw_products (
+    id         SERIAL PRIMARY KEY,
+    source_url TEXT,
+    vendor     TEXT,
+    data       JSONB,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE ai_products (
+    id              SERIAL PRIMARY KEY,
+    raw_product_id  INTEGER REFERENCES raw_products(id),
+    ai_data         JSONB,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+```
+
+### 4. Start all services
+
+Open four terminal windows and run one command in each:
+
 ```bash
+# Terminal 1 — Redis
 redis-server
-```
 
-### 3. Start the Celery worker
-```bash
+# Terminal 2 — Celery worker
 celery -A tasks worker --loglevel=info
-```
 
-### 4. Start the FastAPI server
-```bash
+# Terminal 3 — FastAPI server
 uvicorn main:app --reload
+
+# Terminal 4 — (optional) watch Celery logs or run peek.py
+python peek.py
 ```
 
-### 5. Start Ollama
-Make sure Ollama is running locally before triggering AI generation.
+---
 
-### 6. Make sure PostgreSQL is running
-This project connects to a local PostgreSQL database named `scraper_db`.
+## Usage
 
-## Example request
+### Submit a product URL
 
 ```bash
-curl -X POST http://127.0.0.1:8000/extract   -H "Content-Type: application/json"   -d '{"url":"https://quartzcomponents.com/..."}'
+curl -X POST http://127.0.0.1:8000/extract \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://quartzcomponents.com/products/ra-02-lora-module-ai-thinker"}'
 ```
 
-## Running order
+**Response:**
 
-Open these in separate terminals:
+```json
+{
+  "success": true,
+  "message": "Product scraped and queued for AI generation",
+  "product_id": 27,
+  "vendor": "quartz",
+  "text_length": 4821
+}
+```
 
-1. Redis
-2. Celery worker
-3. Uvicorn API server
-4. Ollama server
-5. PostgreSQL if it is not already running
+The product is saved to the database immediately. Gemini runs in the background — check the Celery terminal for progress.
 
-## Recommended repo hygiene
+### Inspect generated output
 
-### Ignore these folders/files in Git
-- `.next/`
-- `node_modules/`
-- `__pycache__/`
-- `webvenv/` or `.venv/`
-- Redis dumps like `dump.rdb`
-- `.env`
-- build artifacts and local logs
+```bash
+python peek.py
+```
 
-### Suggested commit style
-Use short, clear commit messages like:
-- `feat: add quartz scraper`
-- `fix: align ai prompt with scraped data`
-- `chore: update readme`
-- `refactor: clean database helpers`
+This prints the last 5 generated products with all fields: titles, pricing, tags, keywords, and both HTML descriptions.
 
-### Suggested branch flow
-- `main` for stable code
-- `dev` for ongoing work
-- feature branches for big changes
+### Interactive API docs
 
-### Good daily habit
-After each meaningful change:
-1. test locally
-2. commit with a clear message
-3. push to GitHub
-4. update README if behavior changed
+Visit [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for the auto-generated Swagger UI.
 
-## Known mismatch to fix next
+---
 
-The scraped Quartz data and the AI prompt currently use slightly different field names, so the prompt builder should be aligned with the scraper output before relying on the AI step fully.
+## Supported Vendors
+
+| Vendor | Domain | Status |
+|---|---|---|
+| Quartz Components | quartzcomponents.com | ✅ Supported |
+| Robu | robu.in | ✅ Detected (same pipeline) |
+
+Adding a new vendor requires only one entry in `detect_vendors()` in `main.py` — no scraping selectors to write.
+
+---
+
+## Pricing Formula
+
+All prices are calculated automatically:
+
+```
+Quartz Base Price  →  × 1.18  →  After GST  →  × 1.05  →  Final Selling Price
+```
+
+If the base price cannot be found in the page text, Gemini estimates it from any price signal visible on the page.
+
+---
+
+## Zoho Commerce Integration
+
+By default `TEST_MODE=true` in `.env`. In test mode, the Zoho payload is printed to the Celery terminal instead of being sent.
+
+To publish to Zoho Commerce:
+
+1. Obtain an OAuth token from Zoho
+2. Set `ZOHO_TOKEN=your_token` in `.env`
+3. Set `TEST_MODE=false`
+
+The payload maps to these Zoho fields: `name`, `description`, `price`, `sku`, `tags`, `seo_title`, `seo_desc`.
+
+---
+
+## Architecture Notes
+
+**Why HTML → plain text instead of CSS selectors?**
+Earlier versions used BeautifulSoup selectors to extract specific fields (title, price, SKU). These broke whenever the supplier updated their page layout. The current approach strips all HTML noise and passes the raw visible text directly to Gemini, which extracts every field itself. This is vendor-agnostic and requires zero maintenance when page layouts change.
+
+**Why Celery + Redis?**
+Gemini generation takes 30–60 seconds per product. Running it synchronously would block the API and time out the HTTP request. Celery runs it as a background job so `/extract` returns immediately and the AI result appears in the database when ready.
+
+**JSON robustness**
+Gemini occasionally emits literal newline characters inside JSON string values (common in multi-line HTML blocks), which breaks `json.loads`. `ai_generator.py` includes a character-level cleaner that converts any control characters inside JSON strings to their proper escape sequences before parsing.
+
+---
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `GEMINI_API_KEY` | ✅ | — | Google Gemini API key |
+| `DB_NAME` | ✅ | `scraper_db` | PostgreSQL database name |
+| `DB_USER` | ✅ | — | PostgreSQL username |
+| `DB_HOST` | — | `localhost` | PostgreSQL host |
+| `DB_PORT` | — | `5432` | PostgreSQL port |
+| `TEST_MODE` | — | `true` | Print Zoho payload instead of posting |
+| `ZOHO_TOKEN` | — | — | Zoho Commerce OAuth token |
+
+---
+
+## Dependencies
+
+```
+fastapi
+uvicorn
+requests
+beautifulsoup4
+psycopg2-binary
+google-genai
+python-dotenv
+celery
+redis
+```
+
+---
+
+## Git Hygiene
+
+`.gitignore` should include:
+
+```
+.env
+__pycache__/
+*.pyc
+.venv/
+webvenv/
+dump.rdb
+*.egg-info/
+```
+
+Suggested commit style:
+
+```
+feat: add robu vendor detection
+fix: sanitize null bytes before postgres insert
+chore: update requirements
+refactor: move prompt builder to separate file
+```
+
+---
+
+## Roadmap
+
+- [ ] Bulk URL ingestion (CSV upload)
+- [ ] Frontend dashboard to submit URLs and preview generated listings
+- [ ] Image scraping and upload to Zoho media library
+- [ ] Automatic retry on Gemini parse failure
+- [ ] Support for additional vendors (Robu full integration, mouser.in, evelta.com)
+- [ ] Webhook or polling endpoint to check job status by `product_id`
+- [ ] Admin panel to review and edit AI output before publishing
+
+---
+
+## License
+
+Add your preferred license here.
