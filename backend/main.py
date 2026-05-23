@@ -1,6 +1,5 @@
 #Grouping imports according to PEP8 standard
 #Standard Library
-import json
 import re
 import os
 
@@ -28,17 +27,29 @@ app = FastAPI(title="Yantronix Scraper API") #server object
 
 app.add_middleware( #Middleware = code that runs before every request
     CORSMiddleware, #This one handles browser security rules
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True, #Allows cookies / auth headers #Needed if later I add login/session support
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins       =["http://localhost:3000"],
+    allow_credentials   =True, #Allows cookies / auth headers #Needed if later I add login/session support
+    allow_methods       =["*"],
+    allow_headers       =["*"],
 )
 
 # -----------------------------
 # Request schema
 # -----------------------------
-class ExtractRequest(BaseModel): #I expect JSON like { "url": "https://..." }
-    url: HttpUrl                  #Auto validation, Auto Docs, Type Safety # Ensures valid URL format
+class ExtractRequest(BaseModel):#I expect JSON like { "url": "https://..." }
+    url: HttpUrl                #Auto validation, Auto Docs, Type Safety # Ensures valid URL format
+    vendor: str = "quartz"      #default vendor, can be overridden later
+
+# -----------------------------
+# Vendor Detection
+# -----------------------------
+def detect_vendors(url: HttpUrl) -> str:
+    host = str(url.host)
+    if "quartzcomponents.com" in host:
+        return "quartz"
+    if "robu.in" in host:
+        return "robu"
+    raise HTTPException(status_code=400, detail=f"Unsupported vendor: {host}")
 
 # -----------------------------
 # Utility helpers
@@ -51,166 +62,55 @@ def clean_price(text: str) -> float:
             .strip()
     )
 
-def detect_vendors(url: HttpUrl) -> str:
-    if url.host == "quartzcomponents.com":
-        return "quartz"
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="Unsupported vendor"
-        )
-
 # -----------------------------
-# Pricing Engine
-# -----------------------------    
-def calculate_prices(base_price: float, vendor: str) -> dict:
-    vendor_lower = vendor.lower()
-
-    if vendor_lower == "quartz":
-        selling_price = base_price * 1.18 * 1.05
-    
-    elif vendor_lower == "robu":
-        selling_price = base_price * 1.05
-
-    else:
-        selling_price = base_price
-
-    selling_price = round(selling_price, 2)
-
-    #Fake retail price for discount effect:
-    retail_price = round(selling_price * 1.25, 2)
-
-    return{
-        "base_price" : base_price,
-        "selling_price" : selling_price,
-        "retail_price" : retail_price
-    }
+# HTML -> clean plain text
 # -----------------------------
-# Quartz extractor
-# -----------------------------
-def extract_quartz_product(soup: BeautifulSoup) -> dict:
-    #Title
-    title_tag = soup.select_one("h1.productView-title span")
-    title = title_tag.text.strip() if title_tag else ""
-    title = title.replace("– QuartzComponents", "").strip()
+def html_to_text(html: str) -> str:
+    """
+    Convert a full HTML page to clean plain text — the same thing the
+    'Web Page Text Extractor' Chrome extension does manually.
+ 
+    Steps:
+      1. Remove script/style/nav/footer/header tags entirely (noise)
+      2. Extract visible text with BeautifulSoup
+      3. Collapse blank lines
+    """
+    soup = BeautifulSoup(html, "html.parser")
 
-    #price
-    price_tag = soup.select_one("span.price-item--regular")
-    price = clean_price(price_tag.text) if price_tag else 0
-    pricing = calculate_prices(price, "quartz") if price else{
-        "base_price": None,
-        "selling_price": None,
-        "retail_price": None
-    }
-
-    #SKU & Availability
-    sku = ""
-    availability_text = ""
-
-    for block in soup.select("div.productView-info-item"):
-        label = block.select_one(".productView-info-name")
-        value = block.select_one(".productView-info-value")
-
-        if not label or not value:
-            continue
-
-        label_text = label.text.strip().lower()
-        value_text = value.text.strip()
-
-        if "sku" in label_text:
-            sku = value_text
-        elif "availability" in label_text:
-            availability_text = value_text
-
-    #Availability
-    def parse_availability(text: str) -> dict:
-        match = re.search(r"(\d+)", text)
-        quantity = int(match.group(1)) if match else None
-
-        status = "In Stock" if "stock" in text.lower() else "Out of Stock"
-
-        return{
-            "status": status,
-            "quantity": quantity
-        }
-    availability = parse_availability(availability_text)
-
-    #Description
-    desc_tag = soup.select_one("#tab-description-mobile .tab-popup-content")
-    description_raw = (
-        desc_tag.get_text(" ", strip=True)
-        if desc_tag else ""
-    )
-
-    def clean_description(text: str) -> str:
-        lines = text.split(". ")
-        filtered = [
-            line for line in lines
-            if "http" not in line.lower()
-            and "note" not in line.lower()
-            and "for other color" not in line.lower()
-        ]
-        return ". ".join(filtered).strip()
+    # Remove noisy tags that add no product information
+    for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "iframe", "svg", "form"]):
+        tag.decompose()
     
-    description_clean = clean_description(description_raw)
-    
-    # -------- SPECS --------  
-    def extract_specs_from_description(soup: BeautifulSoup) -> dict:
-        specs = {}
-        for li in soup.select("#tab-description-mobile li"):
-            text = li.get_text(strip=True)
-            if ":" in text:
-                key, value = text.split(":", 1)
-                specs[key.strip()] = value.strip()
-        return specs
-    specifications = extract_specs_from_description(soup)
+    # Get all visible text, separated by newlines
+    text = soup.get_text(separator="\n", strip=True)
 
-    #Images
-    def extract_images_from_json_ld(soup: BeautifulSoup) -> list[str]:
-        images = []
+    # Collapse 3+ consecutive blank lines into one
+    text = re.sub(r"\n{3,}", "\n\n", text)
 
-        for script in soup.find_all("script", type="application/ld+json"):
+    return text.strip()
 
-            if not script.string:
-                continue
-            
-            try:
-                data = json.loads(script.string)
-                if isinstance(data, dict) and data.get("@type") == "Product":
-                    imgs = data.get("image", [])
-                    if isinstance(imgs, list):
-                        images.extend(imgs)
-                    elif isinstance(imgs, str):
-                        images.append(imgs)
-            except Exception:
-                pass
-        return list(dict.fromkeys(images))
-    
-    images = extract_images_from_json_ld(soup)
-
-     # -------- RETURN --------
-    return {
-        "vendor": "quartz",
-        "title": title,
-        "vendor_sku": sku,
-        "availability": availability,
-        "pricing": {
-            "base_price": pricing["base_price"],
-            "selling_price": pricing["selling_price"],
-            "retail_price": pricing["retail_price"],
-            "currency": "INR",
-            "includes_gst": False
-        },
-        "description_raw": description_clean,
-        "specifications": specifications,
-        "images": images
-    }
+def sanitize_text(text: str) -> str:
+    """
+    Strip characters PostgreSQL cannot store in a text/JSON column:
+      - Null bytes (\x00) — hard crash in psycopg2
+      - Unicode surrogates — unpaired surrogates from bad page encodings
+    Encode/decode with 'ignore' drops anything that isn't valid UTF-8.
+    """
+    text = text.replace('\x00', '')                          # kill null bytes first
+    text = text.encode('utf-8', errors='ignore').decode('utf-8')  # drop bad surrogates
+    return text
 
 # -----------------------------
 # Main API endpoint
 # -----------------------------
 @app.post("/extract")
 def extract_website(data: ExtractRequest): #ExtractRequest -> FastAPI automatically: reads JSON, validates, converts to object
+    """
+    Accepts a product page URL.
+    Fetches the page, converts HTML to plain text, and queues an AI generation job.
+    Gemini reads the raw text and both extracts the product data AND
+    generates the full e-commerce listing in one call.
+    """
     try:
         #Step1: Fetch webpage
         response = requests.get(
@@ -223,7 +123,7 @@ def extract_website(data: ExtractRequest): #ExtractRequest -> FastAPI automatica
                 "Connection": "keep-alive",
                 "Upgrade-Insecure-Requests": "1",
             },
-            timeout=10
+            timeout=15
         )
 
         if response.status_code != 200:
@@ -232,44 +132,64 @@ def extract_website(data: ExtractRequest): #ExtractRequest -> FastAPI automatica
                 detail=f"Failed to fetch page — site returned {response.status_code}"
             )
         
-        soup = BeautifulSoup(response.text, "html.parser")
+        #Step 2: Convert HTML to plain text
+        raw_text = sanitize_text(html_to_text(response.text))
 
+        if len(raw_text) < 100:
+            raise HTTPException(
+                status_code=422,
+                detail="Page returned too little text - it may be behind a login or JS-rendered."
+            )
+        
+        # Step 3: Detect vendor
         vendor = detect_vendors(data.url)
 
-        if vendor == "quartz":
-            product_data = extract_quartz_product(soup)
-            product_id = save_raw_product(product_data, str(data.url))
-        else:
-            raise HTTPException(
-                status_code=400, 
-                detail="Unsupported Vendor"
-            )
+        # Step 4: Build a product dict with the raw text
+        # Gemini will extract all real fields (title, price, SKU etc.)
+        # from raw_text inside the prompt — no selector logic needed here
+        product_data = {
+            "vendor":        vendor,
+            "source":        "url_scrape",
+            "source_url":    str(data.url),
+            "raw_page_text": raw_text,
+            # Placeholder fields — Gemini fills real values in ai_data
+            "title":           "",
+            "vendor_sku":      "",
+            "description_raw": "",
+            "specifications":  {},
+            "pricing": {
+                "base_price":    None,
+                "selling_price": None,
+                "retail_price":  None,
+                "currency":      "INR",
+                "includes_gst":  False,
+            },
+            "images": [],
+        }
 
-        #queing AI Job
+        # Step 5: Save raw product and queue AI job
+        product_id = save_raw_product(product_data, str(data.url))
         generate_ai_task.delay(product_id)
 
         return{
             "success": True,
             "message": "Product scraped and queued for AI generation",
             "product_id": product_id,
+            "vendor": vendor,
+            "text_length": len(raw_text),
         }
     
-    except requests.exceptions.RequestException:
+    except requests.exceptions.RequestException as e:
         raise HTTPException(
             status_code=408,
-            detail="Request timed out or failed"
+            detail=f"Request timed out or failed: {e}"
         )
 
     except HTTPException:
         raise  # Re-raise 400/404/etc. as-is — don't let them become 500s
     
-    except Exception as e:
+    except Exception as ex:
         raise HTTPException(
             status_code = 500, 
-            detail=str(e)
+            detail=str(ex)
         )
-    
-    # except Exception as e:
-    #     print("Error: ", e)
-    #     raise
-        

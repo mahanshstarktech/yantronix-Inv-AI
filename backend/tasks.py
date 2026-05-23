@@ -9,8 +9,9 @@ def generate_ai_task(product_id: int):
 
     # Step 1: Fetch raw product from DB
     product = get_raw_product(product_id)
-    if not product:
-        print(f"[ERROR] No product found in DB for id={product_id}")
+    # Guard: don't call Gemini if scraper returned nothing useful
+    if not product.get("raw_page_text"):
+        print(f"[ERROR] Scraper returned empty raw_page_text for product_id={product_id}.")
         return
 
     # Step 2: Call Gemini
