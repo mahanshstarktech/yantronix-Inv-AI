@@ -252,7 +252,7 @@ Gemini occasionally emits literal newline characters inside JSON string values (
 ```
 fastapi
 uvicorn
-requests
+requests 
 beautifulsoup4
 psycopg2-binary
 google-genai

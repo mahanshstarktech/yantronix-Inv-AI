@@ -67,3 +67,18 @@ def get_raw_product(product_id: int) -> Optional[dict]:
         return row[0] if row else None
     finally:
         conn.close()
+
+def get_ai_product(raw_product_id: int) -> Optional[dict]:
+    """Return the AI-generated data for a product, or None if not ready yet."""
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ai_data FROM ai_products WHERE raw_product_id = %s",
+            (raw_product_id,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        return row[0] if row else None
+    finally:
+        conn.close()
