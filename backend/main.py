@@ -19,7 +19,7 @@ from pydantic import BaseModel, HttpUrl #define what data we expect, so that use
 
 #Local
 from tasks import generate_ai_task
-from database import save_raw_product, get_raw_product, get_ai_product
+from database import save_raw_product, get_raw_product, get_ai_product, get_existing_completed_product_by_url
 from publish import publish_to_zoho
 
 
@@ -225,6 +225,17 @@ def generate_listing(data: GenerateRequest):
     }
 
     try:
+        # Check if already generated for this URL
+        existing_id = get_existing_completed_product_by_url(data.source_url)
+        if existing_id:
+            return {
+                "success": True,
+                "message": "Product already generated in DB, skipping AI",
+                "product_id": existing_id,
+                "vendor": data.vendor,
+                "text_length": len(raw_text),
+            }
+
         product_id = save_raw_product(product_data, data.source_url)
         generate_ai_task.delay(product_id)
 

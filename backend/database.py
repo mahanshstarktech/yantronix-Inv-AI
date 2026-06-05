@@ -49,3 +49,18 @@ def get_ai_product(raw_product_id: str) -> Optional[dict]:
         return doc.get("ai_data") if doc else None
     except Exception:
         return None
+
+def get_existing_completed_product_by_url(url: str) -> Optional[str]:
+    """Check if there is already an AI-generated product for this source URL."""
+    try:
+        # Find raw products with this URL, sorted by newest first
+        docs = raw_products_collection.find({"source_url": url}).sort("_id", -1)
+        for doc in docs:
+            raw_id = doc["_id"]
+            # Check if ai_data exists for this raw_product
+            if ai_products_collection.find_one({"raw_product_id": raw_id}):
+                return str(raw_id)
+        return None
+    except Exception:
+        return None
+
