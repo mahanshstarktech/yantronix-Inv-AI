@@ -41,3 +41,11 @@ yarn-error.log*
 next-env.d.ts
 Tutorial_Videos/
 Tutorial_Videos/
+
+
+local-dbs/
+local-dbs/
+
+*/__pycache__
+
+*/venv_win

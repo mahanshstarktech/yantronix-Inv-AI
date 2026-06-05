@@ -48,7 +48,7 @@ export default function Home() {
   const [url, setUrl] = useState('')
   const [scrapeData, setScrapeData] = useState<ScrapeData | null>(null)
   const [editedText, setEditedText] = useState('')
-  const [productId, setProductId] = useState<number | null>(null)
+  const [productId, setProductId] = useState<string | null>(null)
   const [aiData, setAiData] = useState<AIProduct | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<Tab>('overview')

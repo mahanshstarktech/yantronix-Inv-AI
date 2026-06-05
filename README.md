@@ -78,7 +78,7 @@ yantronix-scraper/
 ### Prerequisites
 
 - Python 3.10+
-- PostgreSQL (local or remote)
+- MongoDB (local or remote)
 - Redis
 - A Gemini API key ([get one here](https://aistudio.google.com/app/apikey))
 
@@ -96,34 +96,15 @@ Create a `.env` file in the project root:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
-DB_NAME=scraper_db
-DB_USER=your_postgres_username
-DB_HOST=localhost
-DB_PORT=5432
+MONGO_URI=mongodb://localhost:27017/
+MONGO_DB_NAME=scraper_db
 TEST_MODE=true
 ZOHO_TOKEN=             # leave blank until you are ready to publish
 ```
 
-### 3. Set up the PostgreSQL database
+### 3. Set up MongoDB
 
-```sql
-CREATE DATABASE scraper_db;
-
-CREATE TABLE raw_products (
-    id         SERIAL PRIMARY KEY,
-    source_url TEXT,
-    vendor     TEXT,
-    data       JSONB,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE ai_products (
-    id              SERIAL PRIMARY KEY,
-    raw_product_id  INTEGER REFERENCES raw_products(id),
-    ai_data         JSONB,
-    created_at      TIMESTAMP DEFAULT NOW()
-);
-```
+MongoDB is schema-less, so no explicit table creation is required. The collections `raw_products` and `ai_products` will be created automatically upon first insert. Ensure your MongoDB server is running and accessible via the `MONGO_URI`.
 
 ### 4. Start all services
 
@@ -233,43 +214,6 @@ Gemini occasionally emits literal newline characters inside JSON string values (
 
 ---
 
-## Known Issues & Fixes
-
-### macOS: Python crashes when Celery approves and connects to PostgreSQL
-
-**Symptom:** A "Python quit unexpectedly" crash report appears mid-generation, with a stack trace ending in `pg_GSS_have_cred_cache → krb5_init_context_flags → CoreFoundation → libdispatch → SIGSEGV`.
-
-**Cause:** When Celery forks a worker process on macOS, the child tries to open a Postgres connection. The `libpq` library bundled in the virtualenv has Kerberos (GSSAPI) compiled in and automatically checks for credentials — even on a plain local connection. That check calls CoreFoundation's preferences system via `libdispatch`, which is not fork-safe on macOS and segfaults.
-
-**Fix — two changes required:**
-
-1. Add `gssencmode="disable"` to `DB_CONFIG` in `database.py` to stop libpq from touching Kerberos at all:
-
-```python
-DB_CONFIG = dict(
-    dbname     = os.getenv("DB_NAME", "scraper_db"),
-    user       = os.getenv("DB_USER", "mahanshgaur"),
-    host       = os.getenv("DB_HOST", "localhost"),
-    port       = os.getenv("DB_PORT", "5432"),
-    gssencmode = "disable",   # prevents macOS fork-safety crash
-)
-```
-
-2. Start the Celery worker with `--pool=solo` to avoid forking entirely on macOS:
-
-```bash
-celery -A tasks worker --loglevel=info --pool=solo
-```
-
-`--pool=solo` runs tasks in the same process instead of forking child processes. For a sequential scraping pipeline this has no practical downside and eliminates an entire class of macOS fork-safety issues.
-
-Update the startup command in the README's "Start all services" section accordingly:
-
-```bash
-# Terminal 2 — Celery worker (macOS: --pool=solo avoids fork-safety crash)
-celery -A tasks worker --loglevel=info --pool=solo
-```
-
 ---
 
 ## Environment Variables
@@ -277,10 +221,8 @@ celery -A tasks worker --loglevel=info --pool=solo
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `GEMINI_API_KEY` | ✅ | — | Google Gemini API key |
-| `DB_NAME` | ✅ | `scraper_db` | PostgreSQL database name |
-| `DB_USER` | ✅ | — | PostgreSQL username |
-| `DB_HOST` | — | `localhost` | PostgreSQL host |
-| `DB_PORT` | — | `5432` | PostgreSQL port |
+| `MONGO_URI` | ✅ | `mongodb://localhost:27017/` | MongoDB connection URI |
+| `MONGO_DB_NAME` | — | `scraper_db` | MongoDB database name |
 | `TEST_MODE` | — | `true` | Print Zoho payload instead of posting |
 | `ZOHO_TOKEN` | — | — | Zoho Commerce OAuth token |
 
@@ -293,7 +235,7 @@ fastapi
 uvicorn
 requests 
 beautifulsoup4
-psycopg2-binary
+pymongo
 google-genai
 python-dotenv
 celery

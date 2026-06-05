@@ -1,36 +1,42 @@
-import psycopg2
-import json
 import os
 from dotenv import load_dotenv
+from pymongo import MongoClient
 
 load_dotenv()
 
-conn = psycopg2.connect(
-    dbname = os.getenv("DB_NAME", "scraper_db"),
-    user   = os.getenv("DB_USER", "mahanshgaur"),
-    host   = os.getenv("DB_HOST", "localhost"),
-    port   = os.getenv("DB_PORT", "5432"),
-)
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "scraper_db")
 
-cur = conn.cursor()
-cur.execute("""
-    SELECT
-        r.id,
-        r.source_url,
-        a.ai_data
-    FROM ai_products a
-    JOIN raw_products r ON r.id = a.raw_product_id
-    ORDER BY a.id DESC
-    LIMIT 5
-""")
+client = MongoClient(MONGO_URI)
+db = client[MONGO_DB_NAME]
 
-rows = cur.fetchall()
+ai_products_col = db["ai_products"]
+raw_products_col = db["raw_products"]
+
+# Use aggregation to join ai_products and raw_products
+pipeline = [
+    {
+        "$lookup": {
+            "from": "raw_products",
+            "localField": "raw_product_id",
+            "foreignField": "_id",
+            "as": "raw_product"
+        }
+    },
+    { "$unwind": "$raw_product" },
+    { "$sort": { "_id": -1 } },
+    { "$limit": 5 }
+]
+
+rows = list(ai_products_col.aggregate(pipeline))
 
 if not rows:
     print("No AI products found in database yet.")
 else:
     for row in rows:
-        product_id, source_url, ai = row
+        product_id = str(row["raw_product_id"])
+        source_url = row["raw_product"]["source_url"]
+        ai = row.get("ai_data", {})
         div = "=" * 70
 
         print(f"\n{div}")
@@ -85,6 +91,3 @@ else:
             print(f"\n    ... [{len(long_display) - 2000} more characters] ...")
 
         print(f"\n{div}\n")
-
-cur.close()
-conn.close()

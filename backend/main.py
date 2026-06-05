@@ -243,7 +243,7 @@ def generate_listing(data: GenerateRequest):
 # Polled by the frontend every 3 seconds.
 # ═════════════════════════════════════════════════════════════════════════════
 @app.get("/status/{product_id}")
-def get_status(product_id: int):
+def get_status(product_id: str):
     ai_data = get_ai_product(product_id)
     if ai_data:
         return {"status": "complete", "data": ai_data}
@@ -260,7 +260,7 @@ def get_status(product_id: int):
 # User clicked Approve & Publish. Sends to Zoho (or prints in test mode).
 # ═════════════════════════════════════════════════════════════════════════════
 @app.post("/publish/{product_id}")
-def publish_product(product_id: int):
+def publish_product(product_id: str):
     ai_data = get_ai_product(product_id)
     if not ai_data:
         raise HTTPException(status_code=404, detail="AI product not ready or not found")

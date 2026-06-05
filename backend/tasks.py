@@ -4,7 +4,7 @@ from database import get_raw_product, save_ai_product
 from publish import publish_to_zoho
 
 @celery_app.task
-def generate_ai_task(product_id: int):
+def generate_ai_task(product_id: str):
     print(f"[INFO] Starting AI generation for product_id={product_id}")
 
     # Step 1: Fetch raw product from DB

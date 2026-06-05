@@ -1,84 +1,51 @@
-import psycopg2
-import json
 import os
 from typing import Optional
 from dotenv import load_dotenv
+from pymongo import MongoClient
+from bson.objectid import ObjectId
 
 load_dotenv()
 
 # ── DB config ────────────────────────────────────────────────────────────────
-# Reads from environment variables if present, falls back to local defaults.
-DB_CONFIG = dict(
-    dbname = os.getenv("DB_NAME", "scraper_db"),
-    user   = os.getenv("DB_USER", "mahanshgaur"),
-    host   = os.getenv("DB_HOST", "localhost"),
-    port   = os.getenv("DB_PORT", "5432"),
-)
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "scraper_db")
 
-def get_conn():
-    """Open a fresh connection. Always close it after use."""
-    return psycopg2.connect(**DB_CONFIG)
+client = MongoClient(MONGO_URI)
+db = client[MONGO_DB_NAME]
 
+raw_products_collection = db["raw_products"]
+ai_products_collection = db["ai_products"]
 
-def save_raw_product(product_data: dict, url: str) -> int:
-    conn = get_conn()
+def save_raw_product(product_data: dict, url: str) -> str:
+    """Save raw extracted data and return the stringified ObjectId."""
+    doc = {
+        "source_url": url,
+        "vendor": product_data.get("vendor"),
+        "data": product_data
+    }
+    result = raw_products_collection.insert_one(doc)
+    return str(result.inserted_id)
+
+def save_ai_product(raw_product_id: str, ai_data: dict) -> None:
+    """Save AI generated data linked to the raw product."""
+    doc = {
+        "raw_product_id": ObjectId(raw_product_id),
+        "ai_data": ai_data
+    }
+    ai_products_collection.insert_one(doc)
+
+def get_raw_product(product_id: str) -> Optional[dict]:
+    """Retrieve raw product data by its stringified ObjectId."""
     try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO raw_products (source_url, vendor, data)
-            VALUES (%s, %s, %s)
-            RETURNING id
-            """,
-            (url, product_data["vendor"], json.dumps(product_data))
-        )
-        product_id = cur.fetchone()[0]
-        conn.commit()
-        cur.close()
-        return product_id
-    finally:
-        conn.close()
+        doc = raw_products_collection.find_one({"_id": ObjectId(product_id)})
+        return doc.get("data") if doc else None
+    except Exception:
+        return None
 
-
-def save_ai_product(raw_product_id: int, ai_data: dict) -> None:
-    conn = get_conn()
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO ai_products (raw_product_id, ai_data)
-            VALUES (%s, %s)
-            """,
-            (raw_product_id, json.dumps(ai_data))
-        )
-        conn.commit()
-        cur.close()
-    finally:
-        conn.close()
-
-
-def get_raw_product(product_id: int) -> Optional[dict]:
-    conn = get_conn()
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT data FROM raw_products WHERE id = %s", (product_id,))
-        row = cur.fetchone()
-        cur.close()
-        return row[0] if row else None
-    finally:
-        conn.close()
-
-def get_ai_product(raw_product_id: int) -> Optional[dict]:
+def get_ai_product(raw_product_id: str) -> Optional[dict]:
     """Return the AI-generated data for a product, or None if not ready yet."""
-    conn = get_conn()
     try:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT ai_data FROM ai_products WHERE raw_product_id = %s",
-            (raw_product_id,)
-        )
-        row = cur.fetchone()
-        cur.close()
-        return row[0] if row else None
-    finally:
-        conn.close()
+        doc = ai_products_collection.find_one({"raw_product_id": ObjectId(raw_product_id)})
+        return doc.get("ai_data") if doc else None
+    except Exception:
+        return None

@@ -2,8 +2,8 @@ fastapi
 uvicorn
 requests
 beautifulsoup4
-psycopg2-binary
+pymongo
 google-genai
 python-dotenv
 celery
-redis
+redis==4.6.0
