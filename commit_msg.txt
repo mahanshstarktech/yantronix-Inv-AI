@@ -1,7 +1,0 @@
-feat: Implement Zoho Commerce OAuth, AI generation caching, and update config files
-
-- Implemented production-ready ZohoAuth class with token caching, auto-refresh, and retry mechanisms.
-- Wired ZohoAuth into publish.py to automatically handle authentication during product publishing.
-- Added database lookup in /generate endpoint to instantly return cached AI results for previously processed URLs, eliminating redundant AI calls.
-- Updated .gitignore with comprehensive Python, Node, and database rules.
-- Updated .env.example with all required application variables (Gemini, Mongo, Zoho).
