@@ -3,10 +3,10 @@
 This guide will help you get the application up and running locally in just a few steps.
 
 ## Prerequisites
-- **Node.js** (v18+)
+- **Node.js** (v22+ recommended; v18+ may work for older Next.js versions)
 - **Python** (3.10+)
-- **MongoDB** and **Redis** (Installed locally. Scripts are configured to run the Windows executables from the `local-dbs` folder).
-- **Git** Bash (for running the `.sh` scripts on Windows).
+- **MongoDB** and **Redis** (installed on your PATH, running separately, or downloaded into `local-dbs` by the helper scripts).
+- **Bash** (Git Bash on Windows, or the standard terminal on Linux/macOS).
 
 ---
 
@@ -35,19 +35,27 @@ This guide will help you get the application up and running locally in just a fe
 npm install
 ```
 
+**Local databases:**
+```bash
+# In the root directory
+./setup_dbs.sh
+```
+
+The database setup script uses Docker Compose when it is available on Linux/macOS, downloads local Windows binaries when running in Git Bash, or reuses Redis/MongoDB if they are already installed on PATH.
+
 **Backend (Python FastAPI & Celery):**
 ```bash
-# Move to the backend folder
-cd backend
+# In the root directory
+python3 -m venv .venv
 
-# Create a virtual environment
-python -m venv venv_win
+# Activate it (Linux/macOS)
+source .venv/bin/activate
 
-# Activate it (Windows)
-source venv_win/Scripts/activate
+# Or activate it on Windows Git Bash if you set VENV_PATH=backend/venv_win
+# source backend/venv_win/Scripts/activate
 
 # Install requirements
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 ```
 
 ---
@@ -56,14 +64,17 @@ pip install -r requirements.txt
 
 The project includes a unified script to start the databases, backend server, celery worker, and frontend all at once.
 
-1. Open **Git Bash** (not Command Prompt or PowerShell).
+1. Open a Bash terminal (Git Bash on Windows, or your standard terminal on Linux/macOS).
 2. Run the start script from the root directory:
    ```bash
    ./run_app.sh
    ```
 
 This script will automatically:
-- Start the local **Redis** and **MongoDB** instances.
+- Load variables from `.env` when the file exists; shell-level environment variables are also supported.
+- Create `.venv` and install backend requirements when needed.
+- Run `npm install` when `node_modules` is missing.
+- Start **Redis** and **MongoDB** from Docker Compose, PATH binaries, or `local-dbs`; otherwise it will tell you to run `./setup_dbs.sh` or start them separately.
 - Start the **Celery** worker.
 - Start the **FastAPI** backend on `http://localhost:8000`.
 - Start the **Next.js** frontend on `http://localhost:3000`.

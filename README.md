@@ -93,6 +93,7 @@ Legacy grouped keyword objects are normalized into a flat `seo_keywords: string[
 
 ```bash
 npm install
+./setup_dbs.sh
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
@@ -118,8 +119,8 @@ ALLOWED_ORIGINS=http://localhost:3000
 Open separate terminals:
 
 ```bash
-# Redis
-redis-server
+# Local databases (Docker Compose, PATH binaries, or local-dbs Windows binaries)
+./start_dbs.sh
 
 # FastAPI
 cd backend
