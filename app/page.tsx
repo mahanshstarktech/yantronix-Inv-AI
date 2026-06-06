@@ -1,9 +1,12 @@
 'use client'
 import { useState, useEffect } from 'react'
 
+/** Product workflow stage rendered by the single-page application. */
 type Stage = 'idle' | 'scraping' | 'preview' | 'generating' | 'complete' | 'error'
+/** Result tab available after AI generation completes. */
 type Tab = 'overview' | 'seo' | 'pricing' | 'descriptions' | 'keywords'
 
+/** Sanitized scrape preview returned by POST /extract. */
 interface ScrapeData {
   raw_text: string
   vendor: string
@@ -11,6 +14,7 @@ interface ScrapeData {
   text_length: number
 }
 
+/** Canonical AI product shape returned by the backend. */
 interface AIProduct {
   product_title: string
   seo_title: string
@@ -18,14 +22,9 @@ interface AIProduct {
   hsn_code: string
   sku: string
   weight_kg: number | string
-  dimensions_cm: string
+  dimensions_cm: string | { L?: string; W?: string; H?: string }
   tags: string[]
-  seo_keywords: {
-    primary: string[]
-    secondary: string[]
-    long_tail: string[]
-    negative: string[]
-  }
+  seo_keywords: string[]
   selling_price: {
     vendor_base_price?: number
     quartz_base_price?: number
@@ -39,10 +38,19 @@ interface AIProduct {
   long_description_html: string
 }
 
-const API = 'http://localhost:8000'
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+/** Labels used by the top progress indicator. */
 const STEPS = ['Enter URL', 'Scraping', 'Review Text', 'AI Generating', 'Done']
+/** Maps workflow stages to progress indicator positions. */
 const STAGE_IDX: Record<Stage, number> = { idle: 0, scraping: 1, preview: 2, generating: 3, complete: 4, error: -1 }
 
+/**
+ * Product listing generator page.
+ *
+ * The page intentionally keeps scraping, editing, AI generation, and publishing
+ * as explicit user-visible steps so expensive AI/API calls happen only after
+ * review and approval.
+ */
 export default function Home() {
   const [stage, setStage] = useState<Stage>('idle')
   const [url, setUrl] = useState('')
@@ -58,7 +66,7 @@ export default function Home() {
   const [copied, setCopied] = useState<string | null>(null)
   const [genSeconds, setGenSeconds] = useState(0)
 
-  // Poll /status every 3s while generating
+  /** Poll /status every 3 seconds while the Celery worker generates content. */
   useEffect(() => {
     if (!polling || !productId) return
     const iv = setInterval(async () => {
@@ -69,11 +77,15 @@ export default function Home() {
           setAiData(d.data)
           setStage('complete')
           setPolling(false)
+        } else if (d.status === 'failed') {
+          setError(d.error || 'AI generation failed. Check the worker logs for details.')
+          setStage('error')
+          setPolling(false)
         } else if (!res.ok) {
           throw new Error(d.detail || 'Status check failed')
         }
-      } catch (e: any) {
-        // keep polling on transient errors
+      } catch {
+        // Keep polling on transient network errors.
       }
     }, 3000)
 
@@ -86,13 +98,14 @@ export default function Home() {
     return () => { clearInterval(iv); clearTimeout(tm) }
   }, [polling, productId])
 
-  // Timer while generating
+  /** Display elapsed generation time while polling is active. */
   useEffect(() => {
     if (stage !== 'generating') { setGenSeconds(0); return }
     const iv = setInterval(() => setGenSeconds(s => s + 1), 1000)
     return () => clearInterval(iv)
   }, [stage])
 
+  /** Submit a supplier URL for extraction and move to editable preview. */
   async function handleScrape() {
     if (!url.trim()) return
     setStage('scraping')
@@ -108,12 +121,13 @@ export default function Home() {
       setScrapeData(d)
       setEditedText(d.raw_text)
       setStage('preview')
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(errorMessage(e))
       setStage('error')
     }
   }
 
+  /** Queue AI generation after the user approves or edits scraped text. */
   async function handleApprove() {
     if (!scrapeData) return
     setStage('generating')
@@ -128,12 +142,13 @@ export default function Home() {
       if (!res.ok) throw new Error(d.detail || 'Failed to queue generation')
       setProductId(d.product_id)
       setPolling(true)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(errorMessage(e))
       setStage('error')
     }
   }
 
+  /** Publish the completed product or trigger a backend dry run in test mode. */
   async function handlePublish() {
     if (!productId) return
     try {
@@ -141,17 +156,19 @@ export default function Home() {
       const d = await res.json()
       if (!res.ok) throw new Error(d.detail || 'Publish failed')
       setPublishDone(true)
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(errorMessage(e))
     }
   }
 
+  /** Copy a generated field to the clipboard and briefly mark it as copied. */
   function copy(text: string, key: string) {
     navigator.clipboard.writeText(text)
     setCopied(key)
     setTimeout(() => setCopied(null), 1800)
   }
 
+  /** Reset all transient UI state for a new product search. */
   function reset() {
     setStage('idle'); setUrl(''); setScrapeData(null); setEditedText('')
     setProductId(null); setAiData(null); setError(null)
@@ -159,6 +176,17 @@ export default function Home() {
   }
 
   const stageIdx = STAGE_IDX[stage]
+
+  /** Format dimensions returned as either a string or structured L/W/H object. */
+  function formatDimensions(dimensions: AIProduct['dimensions_cm']): string {
+    if (typeof dimensions === 'string') return dimensions
+    return [dimensions.L, dimensions.W, dimensions.H].filter(Boolean).join(' × ')
+  }
+
+  /** Convert unknown thrown values into display-safe error text. */
+  function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : 'Unexpected error'
+  }
 
   return (
     <div className="page-shell">
@@ -327,14 +355,14 @@ export default function Home() {
                       ['SKU', aiData.sku],
                       ['HSN Code', aiData.hsn_code],
                       ['Weight', `${aiData.weight_kg} kg`],
-                      ['Dimensions', aiData.dimensions_cm],
+                      ['Dimensions', formatDimensions(aiData.dimensions_cm)],
                       ['Availability', aiData.availability?.status ?? '—'],
-                    ] as [string, string][]).map(([k, v], i) => (
+                    ] as [string, string | number][]).map(([k, v], i) => (
                       <tr key={k} className={i % 2 === 0 ? 'row-alt' : ''}>
                         <td className="td-key mono">{k}</td>
                         <td className="td-val">{v}</td>
                         <td className="td-copy">
-                          <button className="copy-btn" onClick={() => copy(v, k)}>
+                          <button className="copy-btn" onClick={() => copy(String(v), k)}>
                             {copied === k ? '✓' : '⧉'}
                           </button>
                         </td>
@@ -430,36 +458,22 @@ export default function Home() {
             {/* ── KEYWORDS ── */}
             {activeTab === 'keywords' && (
               <div className="col-gap">
-                {[
-                  { label: 'PRIMARY',   cls: 'chip-blue',   data: aiData.seo_keywords?.primary   ?? [] },
-                  { label: 'SECONDARY', cls: 'chip-purple', data: aiData.seo_keywords?.secondary ?? [] },
-                  { label: 'LONG TAIL', cls: 'chip-green',  data: aiData.seo_keywords?.long_tail ?? [] },
-                  { label: 'NEGATIVE',  cls: 'chip-red',    data: aiData.seo_keywords?.negative  ?? [] },
-                ].map(({ label, cls, data }) => (
-                  <div key={label}>
-                    <div className="field-label mono" style={{ marginBottom: '10px' }}>{label}</div>
-                    <div className="chip-row">
-                      {(data as string[]).map((kw: string) => (
-                        <span key={kw} className={`chip ${cls}`} onClick={() => copy(kw, kw)}>
-                          {kw}
-                        </span>
-                      ))}
-                    </div>
+                <div>
+                  <div className="field-label mono" style={{ marginBottom: '10px' }}>KEYWORDS</div>
+                  <div className="chip-row">
+                    {(aiData.seo_keywords ?? []).map(kw => (
+                      <span key={kw} className="chip chip-green" onClick={() => copy(kw, kw)}>
+                        {kw}
+                      </span>
+                    ))}
                   </div>
-                ))}
+                </div>
                 <div>
                   <div className="field-label mono" style={{ marginBottom: '8px' }}>ALL KEYWORDS (comma separated)</div>
                   <div className="kw-block mono">
-                    {[
-                      ...(aiData.seo_keywords?.primary   ?? []),
-                      ...(aiData.seo_keywords?.secondary ?? []),
-                      ...(aiData.seo_keywords?.long_tail ?? []),
-                    ].join(', ')}
+                    {(aiData.seo_keywords ?? []).join(', ')}
                   </div>
-                  <button className="copy-link" onClick={() => copy(
-                    [...(aiData.seo_keywords?.primary ?? []), ...(aiData.seo_keywords?.secondary ?? []), ...(aiData.seo_keywords?.long_tail ?? [])].join(', '),
-                    'all-kw'
-                  )}>
+                  <button className="copy-link" onClick={() => copy((aiData.seo_keywords ?? []).join(', '), 'all-kw')}>
                     {copied === 'all-kw' ? '✓ Copied all' : 'Copy all'}
                   </button>
                 </div>
