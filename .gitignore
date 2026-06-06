@@ -28,6 +28,7 @@ __pycache__/
 
 # ── Database / Local Storage ─────────────────────────────────
 local-dbs/
+*.rdb
 
 # ── User Data / Media ────────────────────────────────────────
 Tutorial_Videos/
