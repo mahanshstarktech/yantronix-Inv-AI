@@ -1,134 +1,143 @@
-# Yantronix AI Product Scraper
+# Yantronix AI Product Listing Generator
 
-An automated e-commerce product pipeline for Yantronix. Paste a supplier product page URL — the system fetches it, converts the HTML to clean text, sends it to Gemini AI, and generates a fully structured, SEO-optimized product listing ready for Zoho Commerce.
+Yantronix AI Product Listing Generator is a human-reviewed product-ingestion pipeline for electronics e-commerce. A user pastes a supplier product URL, reviews the extracted plain text, queues a bounded Gemini generation job, and publishes or dry-runs a Zoho Commerce payload.
 
----
+## Architecture
 
-## How It Works
-
-```
-Product URL (POST /extract)
-        │
-        ▼
-FastAPI fetches page (requests)
-        │
-        ▼
-HTML → clean plain text (BeautifulSoup)
-        │
-        ▼
-PostgreSQL  ←──  raw_products saved
-        │
-        ▼
-Celery task queued (Redis broker)
-        │
-        ▼
-Gemini 2.5 Flash extracts + generates listing
-        │
-        ▼
-PostgreSQL  ←──  ai_products saved
-        │
-        ▼
-Zoho Commerce payload built + published
+```text
+Next.js UI
+  └─ POST /extract       FastAPI scrape service
+      └─ Supplier HTML → sanitized text preview
+  └─ POST /generate      MongoDB raw product + Celery job
+      └─ Gemini 2.5 Flash with token/output limits
+      └─ Validated AIProduct saved to MongoDB
+  └─ GET /status/{id}    queued | processing | complete | failed
+  └─ POST /publish/{id}  Zoho payload dry-run or live publish
 ```
 
----
+## Clean-code structure
 
-## Generated Output (per product)
-
-Every product URL produces the following structured data:
-
-| Field | Description |
-|---|---|
-| `product_title` | Full descriptive title with chip name, interface, and use case |
-| `seo_title` | 60–70 character keyword-rich SEO title |
-| `meta_description` | 150–160 character meta with specs and CTA |
-| `seo_description` | 2–3 sentence paragraph for the product page |
-| `hsn_code` | 6-digit GST HSN code |
-| `sku` | Extracted or inferred SKU |
-| `weight_kg` | Weight in kilograms |
-| `dimensions_cm` | L × W × H in centimetres |
-| `selling_price` | Breakdown: base → after GST (×1.18) → after margin (×1.05) |
-| `tags` | 20+ tags covering chip, interface, use case, platform, audience |
-| `seo_keywords` | 25+ flat keyword list: short-tail, long-tail, buy/shop phrases |
-| `short_description_html` | HTML `<ul>` spec list with intro paragraph |
-| `long_description_html` | Full HTML: Overview, Specs table, How It Works, Pin Description, Compatible Platforms, Applications, Assembly Tips, Sample Code, Package Contents, Safety Warning |
-
----
-
-## Project Structure
-
-```
-yantronix-scraper/
-├── main.py          # FastAPI app — URL ingestion, HTML→text, vendor detection
-├── tasks.py         # Celery background task — orchestrates the full pipeline
-├── ai_generator.py  # Gemini 2.5 Flash API call and JSON parsing
-├── prompts.py       # Prompt builder — feeds raw text + pricing to Gemini
-├── database.py      # PostgreSQL helpers — save/load raw and AI products
-├── publish.py       # Zoho Commerce payload builder and publisher
-├── celery_app.py    # Celery + Redis configuration
-├── peek.py          # CLI tool to inspect generated output in the database
-├── requirements.txt # Python dependencies
-└── .env             # API keys and config (never commit this)
+```text
+backend/
+├── app/
+│   ├── api/routes.py                    # Thin FastAPI route handlers
+│   ├── core/config.py                   # Typed settings loaded from env
+│   ├── core/rate_limiter.py             # Dependency-free request limiters
+│   ├── main.py                          # FastAPI app factory
+│   ├── models/product.py                # Pydantic API/DB/AI contracts
+│   ├── repositories/product_repository.py # MongoDB persistence boundary
+│   ├── services/
+│   │   ├── ai_service.py                # Gemini client + JSON validation
+│   │   ├── prompt_builder.py            # Bounded prompt builder
+│   │   ├── publisher.py                 # Zoho payload/publisher service
+│   │   └── scraper.py                   # Vendor detection + HTML cleanup
+│   └── workers/tasks.py                 # Celery background tasks
+├── main.py                              # Compatibility entrypoint
+├── tasks.py                             # Compatibility Celery entrypoint
+└── zoho/                                # Zoho OAuth implementation
 ```
 
----
+The backend follows a layered pattern:
 
-## Local Setup
+- **API layer:** validates requests, applies rate limits, and delegates work.
+- **Service layer:** contains business logic for scraping, AI generation, and publishing.
+- **Repository layer:** owns MongoDB reads/writes and status updates.
+- **Model layer:** defines explicit Pydantic contracts for API, AI output, and persisted records.
+- **Worker layer:** runs long AI work outside request/response cycles.
 
-### Prerequisites
+## Safeguards and limits
 
+The app includes guardrails to reduce API spam and AI token spend:
+
+| Setting | Default | Purpose |
+|---|---:|---|
+| `MAX_RAW_TEXT_CHARS` | `12000` | Caps scraped/edited text sent into Gemini prompts |
+| `GEMINI_MAX_OUTPUT_TOKENS` | `12000` | Caps generated response size |
+| `RATE_LIMIT_EXTRACT_PER_MINUTE` | `10` | Limits scrape requests per caller |
+| `RATE_LIMIT_GENERATE_PER_MINUTE` | `5` | Limits generation queue requests per caller |
+| `RATE_LIMIT_AI_CALLS_PER_HOUR` | `20` | Hourly AI job limiter per caller |
+| `RATE_LIMIT_PUBLISH_PER_MINUTE` | `3` | Limits publish attempts per caller |
+
+> The current limiter is in-memory and works for a single FastAPI process. For multi-instance production deployments, replace it with a Redis-backed limiter using the same policy names.
+
+## Generated product contract
+
+Gemini output is validated into an `AIProduct` model before saving:
+
+- `product_title`
+- `seo_title`
+- `meta_description`
+- `seo_description`
+- `hsn_code`
+- `sku`
+- `weight_kg`
+- `dimensions_cm`
+- `selling_price`
+- `tags`
+- `seo_keywords`
+- `short_description_html`
+- `long_description_html`
+
+Legacy grouped keyword objects are normalized into a flat `seo_keywords: string[]` list.
+
+## Prerequisites
+
+- Node.js 22+
 - Python 3.10+
-- MongoDB (local or remote)
+- MongoDB
 - Redis
-- A Gemini API key ([get one here](https://aistudio.google.com/app/apikey))
+- Google Gemini API key
+- Zoho OAuth credentials if live publishing is enabled
 
-### 1. Clone and install
+## Installation
 
 ```bash
-git clone https://github.com/your-username/yantronix-scraper.git
-cd yantronix-scraper
-pip install -r requirements.txt
+npm install
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+cp .env.example .env
 ```
 
-### 2. Configure environment
+## Environment variables
 
-Create a `.env` file in the project root:
+See `.env.example` for the full list. Minimum local dry-run setup:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
 MONGO_URI=mongodb://localhost:27017/
 MONGO_DB_NAME=scraper_db
+REDIS_URL=redis://localhost:6379/0
 TEST_MODE=true
-ZOHO_TOKEN=             # leave blank until you are ready to publish
+NEXT_PUBLIC_API_URL=http://localhost:8000
+ALLOWED_ORIGINS=http://localhost:3000
 ```
 
-### 3. Set up MongoDB
+## Running locally
 
-MongoDB is schema-less, so no explicit table creation is required. The collections `raw_products` and `ai_products` will be created automatically upon first insert. Ensure your MongoDB server is running and accessible via the `MONGO_URI`.
-
-### 4. Start all services
-
-Open four terminal windows and run one command in each:
+Open separate terminals:
 
 ```bash
-# Terminal 1 — Redis
+# Redis
 redis-server
 
-# Terminal 2 — Celery worker
-celery -A tasks worker --loglevel=info --pool=solo
-
-# Terminal 3 — FastAPI server
+# FastAPI
+cd backend
 uvicorn main:app --reload
 
-# Terminal 4 — (optional) watch Celery logs or run peek.py
-python peek.py
+# Celery worker
+cd backend
+celery -A tasks worker --loglevel=info --pool=solo
+
+# Next.js
+npm run dev
 ```
 
----
+Visit <http://localhost:3000>.
 
-## Usage
+## API workflow
 
-### Submit a product URL
+### Extract supplier text
 
 ```bash
 curl -X POST http://127.0.0.1:8000/extract \
@@ -136,151 +145,36 @@ curl -X POST http://127.0.0.1:8000/extract \
   -d '{"url": "https://quartzcomponents.com/products/ra-02-lora-module-ai-thinker"}'
 ```
 
-**Response:**
-
-```json
-{
-  "success": true,
-  "message": "Product scraped and queued for AI generation",
-  "product_id": 27,
-  "vendor": "quartz",
-  "text_length": 4821
-}
-```
-
-The product is saved to the database immediately. Gemini runs in the background — check the Celery terminal for progress.
-
-### Inspect generated output
+### Queue AI generation
 
 ```bash
-python peek.py
+curl -X POST http://127.0.0.1:8000/generate \
+  -H "Content-Type: application/json" \
+  -d '{"raw_text":"...reviewed text...","vendor":"quartz","source_url":"https://example.com/product"}'
 ```
 
-This prints the last 5 generated products with all fields: titles, pricing, tags, keywords, and both HTML descriptions.
+### Poll status
 
-### Interactive API docs
+```bash
+curl http://127.0.0.1:8000/status/<product_id>
+```
 
-Visit [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for the auto-generated Swagger UI.
+### Publish or dry-run Zoho payload
 
----
+```bash
+curl -X POST http://127.0.0.1:8000/publish/<product_id>
+```
 
-## Supported Vendors
+## Supported vendors
 
 | Vendor | Domain | Status |
 |---|---|---|
-| Quartz Components | quartzcomponents.com | ✅ Supported |
-| Robu | robu.in | ✅ Detected (same pipeline) |
+| Quartz Components | `quartzcomponents.com` | Supported |
+| Robu | `robu.in` | Supported |
 
-Adding a new vendor requires only one entry in `detect_vendors()` in `main.py` — no scraping selectors to write.
+## Development checks
 
----
-
-## Pricing Formula
-
-All prices are calculated automatically:
-
+```bash
+npm run lint
+PYTHONPATH=backend python3 -m compileall backend
 ```
-Quartz Base Price  →  × 1.18  →  After GST  →  × 1.05  →  Final Selling Price
-```
-
-If the base price cannot be found in the page text, Gemini estimates it from any price signal visible on the page.
-
----
-
-## Zoho Commerce Integration
-
-By default `TEST_MODE=true` in `.env`. In test mode, the Zoho payload is printed to the Celery terminal instead of being sent.
-
-To publish to Zoho Commerce:
-
-1. Obtain an OAuth token from Zoho
-2. Set `ZOHO_TOKEN=your_token` in `.env`
-3. Set `TEST_MODE=false`
-
-The payload maps to these Zoho fields: `name`, `description`, `price`, `sku`, `tags`, `seo_title`, `seo_desc`.
-
----
-
-## Architecture Notes
-
-**Why HTML → plain text instead of CSS selectors?**
-Earlier versions used BeautifulSoup selectors to extract specific fields (title, price, SKU). These broke whenever the supplier updated their page layout. The current approach strips all HTML noise and passes the raw visible text directly to Gemini, which extracts every field itself. This is vendor-agnostic and requires zero maintenance when page layouts change.
-
-**Why Celery + Redis?**
-Gemini generation takes 30–60 seconds per product. Running it synchronously would block the API and time out the HTTP request. Celery runs it as a background job so `/extract` returns immediately and the AI result appears in the database when ready.
-
-**JSON robustness**
-Gemini occasionally emits literal newline characters inside JSON string values (common in multi-line HTML blocks), which breaks `json.loads`. `ai_generator.py` includes a character-level cleaner that converts any control characters inside JSON strings to their proper escape sequences before parsing.
-
----
-
----
-
-## Environment Variables
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `GEMINI_API_KEY` | ✅ | — | Google Gemini API key |
-| `MONGO_URI` | ✅ | `mongodb://localhost:27017/` | MongoDB connection URI |
-| `MONGO_DB_NAME` | — | `scraper_db` | MongoDB database name |
-| `TEST_MODE` | — | `true` | Print Zoho payload instead of posting |
-| `ZOHO_TOKEN` | — | — | Zoho Commerce OAuth token |
-
----
-
-## Dependencies
-
-```
-fastapi
-uvicorn
-requests 
-beautifulsoup4
-pymongo
-google-genai
-python-dotenv
-celery
-redis
-```
-
----
-
-## Git Hygiene
-
-`.gitignore` should include:
-
-```
-.env
-__pycache__/
-*.pyc
-.venv/
-webvenv/
-dump.rdb
-*.egg-info/
-```
-
-Suggested commit style:
-
-```
-feat: add robu vendor detection
-fix: sanitize null bytes before postgres insert
-chore: update requirements
-refactor: move prompt builder to separate file
-```
-
----
-
-## Roadmap
-
-- [ ] Bulk URL ingestion (CSV upload)
-- [ ] Frontend dashboard to submit URLs and preview generated listings
-- [ ] Image scraping and upload to Zoho media library
-- [ ] Automatic retry on Gemini parse failure
-- [ ] Support for additional vendors (Robu full integration, mouser.in, evelta.com)
-- [ ] Webhook or polling endpoint to check job status by `product_id`
-- [ ] Admin panel to review and edit AI output before publishing
-<!-- 
----
-
-## License
-
-Add your preferred license here. -->

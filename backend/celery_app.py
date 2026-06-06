@@ -8,8 +8,7 @@ load_dotenv()
 
 celery_app = Celery(
     "yantronix",
-    broker  = "redis://localhost:6379/0",
-    backend = "redis://localhost:6379/0",
-    include = ["tasks"],   # tells the worker where to find tasks — without this,
-                           # the worker boots but never discovers generate_ai_task
+    broker  = os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    backend = os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    include = ["app.workers.tasks", "tasks"],
 )

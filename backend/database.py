@@ -1,66 +1,40 @@
-import os
+"""Compatibility wrappers around the MongoDB product repository."""
+
+from __future__ import annotations
+
 from typing import Optional
-from dotenv import load_dotenv
-from pymongo import MongoClient
-from bson.objectid import ObjectId
 
-load_dotenv()
+from app.models.product import AIProduct, RawProductData
+from app.repositories.product_repository import repository
 
-# ── DB config ────────────────────────────────────────────────────────────────
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "scraper_db")
-
-client = MongoClient(MONGO_URI)
-db = client[MONGO_DB_NAME]
-
-raw_products_collection = db["raw_products"]
-ai_products_collection = db["ai_products"]
 
 def save_raw_product(product_data: dict, url: str) -> str:
     """Save raw extracted data and return the stringified ObjectId."""
-    doc = {
-        "source_url": url,
-        "vendor": product_data.get("vendor"),
-        "data": product_data
-    }
-    result = raw_products_collection.insert_one(doc)
-    return str(result.inserted_id)
+
+    payload = dict(product_data)
+    payload["source_url"] = url
+    return repository.save_raw_product(RawProductData.model_validate(payload))
+
 
 def save_ai_product(raw_product_id: str, ai_data: dict) -> None:
     """Save AI generated data linked to the raw product."""
-    doc = {
-        "raw_product_id": ObjectId(raw_product_id),
-        "ai_data": ai_data
-    }
-    ai_products_collection.insert_one(doc)
+
+    repository.save_ai_product(raw_product_id, AIProduct.model_validate(ai_data))
+
 
 def get_raw_product(product_id: str) -> Optional[dict]:
     """Retrieve raw product data by its stringified ObjectId."""
-    try:
-        doc = raw_products_collection.find_one({"_id": ObjectId(product_id)})
-        return doc.get("data") if doc else None
-    except Exception:
-        return None
+
+    return repository.get_raw_product(product_id)
+
 
 def get_ai_product(raw_product_id: str) -> Optional[dict]:
     """Return the AI-generated data for a product, or None if not ready yet."""
-    try:
-        doc = ai_products_collection.find_one({"raw_product_id": ObjectId(raw_product_id)})
-        return doc.get("ai_data") if doc else None
-    except Exception:
-        return None
+
+    return repository.get_ai_product(raw_product_id)
+
 
 def get_existing_completed_product_by_url(url: str) -> Optional[str]:
     """Check if there is already an AI-generated product for this source URL."""
-    try:
-        # Find raw products with this URL, sorted by newest first
-        docs = raw_products_collection.find({"source_url": url}).sort("_id", -1)
-        for doc in docs:
-            raw_id = doc["_id"]
-            # Check if ai_data exists for this raw_product
-            if ai_products_collection.find_one({"raw_product_id": raw_id}):
-                return str(raw_id)
-        return None
-    except Exception:
-        return None
 
+    return repository.get_existing_completed_product_by_url(url)
