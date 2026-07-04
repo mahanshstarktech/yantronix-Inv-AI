@@ -4,4 +4,4 @@ compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-VITE_API_BASE_URL = "https://your-api.railway.app"
+VITE_API_BASE_URL = "https://yantronix-api.onrender.com"
