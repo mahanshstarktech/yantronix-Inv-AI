@@ -1,0 +1,29 @@
+services:
+  # ── Free Redis instance for Celery queue ────────────────────────────────────
+  - type: redis
+    name: yantronix-redis
+    plan: free
+    ipAllowList: [] # internal only
+
+  # ── FastAPI + Celery Web Service ────────────────────────────────────────────
+  - type: web
+    name: yantronix-api
+    env: python
+    plan: free
+    rootDir: backend
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "bash render-start.sh"
+    healthCheckPath: "/health"
+    envVars:
+      # Connects automatically to the Redis service defined above
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: yantronix-redis
+          property: connectionString
+      
+      # Python optimization
+      - key: PYTHONUNBUFFERED
+        value: "true"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "true"
