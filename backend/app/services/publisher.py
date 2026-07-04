@@ -62,7 +62,6 @@ class ZohoPayloadBuilder:
             "is_featured": False,
             "unit": "Nos",
             "brand": brand_name or ai_product.get("brand", "") or "Generic",
-            "custom_fields": self._build_custom_fields(source_url),
             "product_short_description": self._sanitizer.sanitize(ai_product.get("short_description_html") or ai_product.get("seo_description", "")),
             "product_description": self._sanitizer.sanitize(ai_product.get("long_description_html", "")),
             "seo_title": ai_product.get("seo_title", "")[:70],
@@ -82,6 +81,7 @@ class ZohoPayloadBuilder:
                     "upc": "",
                     "isbn": "",
                     "part_number": "",
+                    "custom_fields": self._build_custom_fields(source_url),
                     "package_details": {
                         "weight": str(ai_product.get("weight_kg", "")),
                         "height": dims["H"],
@@ -159,23 +159,33 @@ class ZohoPayloadBuilder:
 
     @staticmethod
     def _build_custom_fields(source_url: str) -> List[Dict[str, Any]]:
-        """Build custom_fields list using real customfield_id from env if available,
-        falling back to api_name patterns and then label-based format."""
+        """Build variant-level custom_fields using real Zoho customfield_id values.
+
+        Company Division is a DROPDOWN field - Zoho requires the option_id as value.
+        Ref Link is a URL field - Zoho accepts the URL string directly.
+        """
         company_div_id = settings.zoho_cf_company_division_id
+        company_div_option_id = settings.zoho_cf_company_division_option_id
         ref_link_id = settings.zoho_cf_ref_link_id
 
         if company_div_id and ref_link_id:
-            # Best case: we have the real IDs from Zoho
-            logger.info("Using configured customfield_id values for custom fields.")
-            return [
-                {"customfield_id": company_div_id, "value": "Yantronix"},
-                {"customfield_id": ref_link_id, "value": source_url},
+            logger.info("Using configured customfield_id values for variant custom fields.")
+            fields: List[Dict[str, Any]] = [
+                {
+                    "customfield_id": company_div_id,
+                    "value": company_div_option_id or "Yantronix",
+                },
+                {
+                    "customfield_id": ref_link_id,
+                    "value": source_url,
+                },
             ]
+            return fields
 
-        # Fallback: try api_name (cf_ prefix is Zoho's convention)
+        # Fallback: api_name (Zoho's convention is cf_ + field_name)
         logger.warning(
-            "ZOHO_CF_COMPANY_DIVISION_ID / ZOHO_CF_REF_LINK_ID not set. "
-            "Call GET /zoho-custom-fields to get the IDs, then set them in .env."
+            "ZOHO_CF_COMPANY_DIVISION_ID / ZOHO_CF_REF_LINK_ID not set in .env. "
+            "Custom fields will attempt api_name fallback."
         )
         return [
             {"api_name": "cf_company_division", "value": "Yantronix"},
