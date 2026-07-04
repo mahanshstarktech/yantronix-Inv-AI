@@ -141,6 +141,7 @@ class AIProduct(BaseModel):
     seo_description: str = ""
     hsn_code: str = ""
     sku: str = ""
+    brand: str = ""
     weight_kg: Union[float, str] = 0.0
     dimensions_cm: Union[str, Dimensions] = ""
     selling_price: SellingPrice = Field(default_factory=SellingPrice)

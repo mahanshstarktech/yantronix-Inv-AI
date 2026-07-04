@@ -27,6 +27,7 @@ class ProductRepository:
         self.raw_products: Collection = self._db["raw_products"]
         self.ai_products: Collection = self._db["ai_products"]
         self.publish_log: Collection = self._db["publish_log"]
+        self.sequences: Collection = self._db["sequences"]
 
     def ensure_indexes(self) -> None:
         """Create indexes used by duplicate checks and status lookups.
@@ -101,14 +102,33 @@ class ProductRepository:
         return doc.get("ai_data") if doc else None
 
     def get_existing_completed_product_by_url(self, url: str) -> Optional[str]:
-        """Return the newest completed raw product id for an already-generated URL."""
-
+        """Check if a product from this URL is already queued or processed."""
         docs = self.raw_products.find({"source_url": url}).sort("_id", -1)
         for doc in docs:
-            raw_id = doc["_id"]
-            if self.ai_products.find_one({"raw_product_id": raw_id}):
-                return str(raw_id)
+            # Must also check ai_products to see if it reached at least COMPLETE state
+            ai_doc = self.get_ai_product(str(doc["_id"]))
+            if ai_doc:
+                return str(doc["_id"])
         return None
+
+    def get_next_sku_sequence(self, sequence_name: str = "product_sku", start_at: int = 150) -> int:
+        """Atomically fetch and increment the SKU sequence."""
+        result = self.sequences.find_one_and_update(
+            {"_id": sequence_name},
+            {"$inc": {"seq": 1}},
+            upsert=True,
+            return_document=True,
+        )
+        seq = result.get("seq", start_at)
+        # If it just initialized via upsert, it will be 1, but we want it to start at 150
+        if seq == 1 and start_at > 1:
+            result = self.sequences.find_one_and_update(
+                {"_id": sequence_name},
+                {"$set": {"seq": start_at}},
+                return_document=True,
+            )
+            seq = result.get("seq", start_at)
+        return seq
 
     def mark_status(
         self,

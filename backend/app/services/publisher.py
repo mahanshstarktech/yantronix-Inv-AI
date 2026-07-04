@@ -46,7 +46,7 @@ class ZohoPayloadBuilder:
     def __init__(self, sanitizer: Optional[HtmlSanitizer] = None) -> None:
         self._sanitizer = sanitizer or HtmlSanitizer()
 
-    def build(self, ai_product: Dict[str, Any], category_id: Optional[str] = None) -> Dict[str, Any]:
+    def build(self, ai_product: Dict[str, Any], category_id: Optional[str] = None, source_url: str = "", generated_sku: str = "") -> Dict[str, Any]:
         """Return a Zoho Commerce product payload from an AI product dictionary."""
 
         name = ai_product.get("product_title", "Unnamed Product")
@@ -59,6 +59,11 @@ class ZohoPayloadBuilder:
             "show_in_storefront": True,
             "is_returnable": False,
             "is_featured": False,
+            "unit": "Nos",
+            "custom_fields": [
+                {"label": "Company Division", "value": "Yantronix"},
+                {"label": "Ref Link", "value": source_url}
+            ],
             "brand": ai_product.get("brand", ""),
             "product_short_description": self._sanitizer.sanitize(ai_product.get("short_description_html") or ai_product.get("seo_description", "")),
             "product_description": self._sanitizer.sanitize(ai_product.get("long_description_html", "")),
@@ -70,7 +75,7 @@ class ZohoPayloadBuilder:
                 {
                     "rate": rate,
                     "label_rate": self._label_rate(ai_product, rate),
-                    "sku": ai_product.get("sku", ""),
+                    "sku": generated_sku or ai_product.get("sku", ""),
                     "initial_stock": "0",
                     "reorder_level": "5",
                     "status": "active",
@@ -164,10 +169,15 @@ class ZohoPublisher:
         self._payload_builder = payload_builder or ZohoPayloadBuilder()
         self._auth: Optional[ZohoAuth] = None
 
-    def publish(self, ai_product: Dict[str, Any], category_id: Optional[str] = None) -> Dict[str, Any]:
+    def publish(self, ai_product: Dict[str, Any], category_id: Optional[str] = None, source_url: str = "", generated_sku: str = "") -> Dict[str, Any]:
         """Build and publish a product payload, or return dry-run data in test mode."""
 
-        payload = self._payload_builder.build(ai_product, category_id=category_id)
+        payload = self._payload_builder.build(
+            ai_product, 
+            category_id=category_id,
+            source_url=source_url,
+            generated_sku=generated_sku
+        )
         if settings.test_mode:
             logger.info("TEST MODE — payload built, not sent to Zoho.")
             print("\n" + "=" * 60)

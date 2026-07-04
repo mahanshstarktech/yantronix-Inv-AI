@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Body, HTTPException, Request
-
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Request
+from pydantic import HttpUrl
+from bson import ObjectId
 from app.core.config import settings
 from app.core.rate_limiter import LimitPolicy, client_key, rate_limiter
 from app.models.product import (
@@ -148,6 +149,8 @@ def publish_product(
     in the publish audit log.
     """
 
+    import datetime
+    
     rate_limiter.check(
         client_key(request),
         LimitPolicy("publish", settings.rate_limit_publish_per_minute, 60),
@@ -156,7 +159,28 @@ def publish_product(
     if not ai_data:
         raise HTTPException(status_code=404, detail="AI product not ready or not found")
 
-    result = publisher.publish(ai_data, category_id=body.category_id)
+    raw_doc = repository.raw_products.find_one({"_id": ObjectId(product_id)})
+    if not raw_doc:
+        raise HTTPException(status_code=404, detail="Raw product not found")
+        
+    source_url = raw_doc.get("source_url", "")
+    
+    # Calculate Year string like "2627"
+    now = datetime.datetime.now()
+    year1 = str(now.year)[-2:]
+    year2 = str(now.year + 1)[-2:]
+    year_str = f"{year1}{year2}"
+    
+    # Get sequence 0150, 0151...
+    seq = repository.get_next_sku_sequence(f"sku_seq_{now.year}")
+    sku_str = f"YTX{year_str}{seq:04d}"
+
+    result = publisher.publish(
+        ai_data, 
+        category_id=body.category_id, 
+        source_url=source_url, 
+        generated_sku=sku_str
+    )
 
     # Save audit trail (best-effort — never fail the request because of this)
     repository.save_publish_result(

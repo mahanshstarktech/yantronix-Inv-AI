@@ -45,6 +45,7 @@ OUTPUT FORMAT (all fields required):
   "seo_description": "2–3 sentence SEO paragraph for an India/Yantronix product page",
   "hsn_code": "6-digit GST HSN code",
   "sku": "SKU extracted from page or inferred from product name",
+  "brand": "Extracted brand name, or empty string if unknown",
   "weight_kg": 0.025,
   "dimensions_cm": "L × W × H in cm, for example 3.2 × 1.4 × 0.8",
   "selling_price": {{
