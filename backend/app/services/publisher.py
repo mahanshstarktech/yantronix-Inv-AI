@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
 from typing import Any, Dict, List, Optional
 
@@ -61,10 +62,7 @@ class ZohoPayloadBuilder:
             "is_featured": False,
             "unit": "Nos",
             "brand": brand_name or ai_product.get("brand", "") or "Generic",
-            "custom_fields": [
-                {"label": "Company Division", "value": "Yantronix"},
-                {"label": "Ref Link", "value": source_url},
-            ],
+            "custom_fields": self._build_custom_fields(source_url),
             "product_short_description": self._sanitizer.sanitize(ai_product.get("short_description_html") or ai_product.get("seo_description", "")),
             "product_description": self._sanitizer.sanitize(ai_product.get("long_description_html", "")),
             "seo_title": ai_product.get("seo_title", "")[:70],
@@ -141,16 +139,14 @@ class ZohoPayloadBuilder:
 
     @staticmethod
     def _label_rate(ai_product: Dict[str, Any], rate: str) -> str:
-        price = ai_product.get("selling_price", {})
-        label = 0.0
-        if isinstance(price, dict):
-            label = float(price.get("vendor_base_price") or price.get("quartz_base_price") or price.get("final_selling_price") or 0)
-        
+        """Retail price = selling price + 5-15% (random), always >= selling price."""
         rate_float = float(rate) if rate else 0.0
-        # Zoho requires MRP (label_rate) to be >= Selling Price (rate)
-        if label < rate_float:
+        if rate_float <= 0:
             return rate
-        return str(label)
+        # Add a random 5-15% markup for retail (MRP)
+        markup = random.uniform(0.05, 0.15)
+        retail = round(rate_float * (1 + markup), 2)
+        return str(retail)
 
     @staticmethod
     def _dimensions(ai_product: Dict[str, Any]) -> Dict[str, str]:
@@ -160,6 +156,31 @@ class ZohoPayloadBuilder:
         parts = re.findall(r"\d+(?:\.\d+)?", str(dims))[:3]
         parts += [""] * (3 - len(parts))
         return {"L": parts[0], "W": parts[1], "H": parts[2]}
+
+    @staticmethod
+    def _build_custom_fields(source_url: str) -> List[Dict[str, Any]]:
+        """Build custom_fields list using real customfield_id from env if available,
+        falling back to api_name patterns and then label-based format."""
+        company_div_id = settings.zoho_cf_company_division_id
+        ref_link_id = settings.zoho_cf_ref_link_id
+
+        if company_div_id and ref_link_id:
+            # Best case: we have the real IDs from Zoho
+            logger.info("Using configured customfield_id values for custom fields.")
+            return [
+                {"customfield_id": company_div_id, "value": "Yantronix"},
+                {"customfield_id": ref_link_id, "value": source_url},
+            ]
+
+        # Fallback: try api_name (cf_ prefix is Zoho's convention)
+        logger.warning(
+            "ZOHO_CF_COMPANY_DIVISION_ID / ZOHO_CF_REF_LINK_ID not set. "
+            "Call GET /zoho-custom-fields to get the IDs, then set them in .env."
+        )
+        return [
+            {"api_name": "cf_company_division", "value": "Yantronix"},
+            {"api_name": "cf_ref_link", "value": source_url},
+        ]
 
 
 class ZohoPublisher:

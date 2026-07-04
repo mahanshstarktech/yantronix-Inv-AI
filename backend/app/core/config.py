@@ -65,5 +65,9 @@ class Settings:
     zoho_api_domain: str = os.getenv("ZOHO_API_DOMAIN", "https://commerce.zoho.in").rstrip("/")
     zoho_store_domain: str = os.getenv("ZOHO_STORE_DOMAIN", "")
 
+    # Custom field IDs — fill via /zoho-custom-fields API response
+    zoho_cf_company_division_id: str = os.getenv("ZOHO_CF_COMPANY_DIVISION_ID", "")
+    zoho_cf_ref_link_id: str = os.getenv("ZOHO_CF_REF_LINK_ID", "")
+
 
 settings = Settings()

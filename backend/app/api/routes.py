@@ -27,6 +27,7 @@ from app.services.scraper import HtmlTextExtractor, scraper_service
 from app.services.publisher import publisher
 from app.services.zoho_categories import zoho_category_service
 from app.services.zoho_brands import zoho_brand_service
+from app.services.zoho_custom_fields import zoho_custom_field_service
 from app.services.category_suggester import get_category_suggester
 from app.workers.tasks import generate_ai_task
 
@@ -143,6 +144,30 @@ def get_brands(refresh: bool = False) -> dict:
     try:
         brands = zoho_brand_service.get_brands(force_refresh=refresh)
         return {"brands": brands, "total": len(brands)}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.get("/zoho-custom-fields")
+def get_zoho_custom_fields(refresh: bool = False) -> dict:
+    """Fetch all Zoho Commerce product custom field definitions.
+
+    Call this once to find the customfield_id values for 'Company Division'
+    and 'Ref Link', then paste them into your .env file as:
+      ZOHO_CF_COMPANY_DIVISION_ID=<id>
+      ZOHO_CF_REF_LINK_ID=<id>
+    """
+    try:
+        fields = zoho_custom_field_service.get_custom_fields(force_refresh=refresh)
+        return {
+            "fields": fields,
+            "total": len(fields),
+            "configured": {
+                "ZOHO_CF_COMPANY_DIVISION_ID": settings.zoho_cf_company_division_id or "NOT SET",
+                "ZOHO_CF_REF_LINK_ID": settings.zoho_cf_ref_link_id or "NOT SET",
+            },
+            "tip": "Copy the customfield_id values above into your .env file, then restart the backend.",
+        }
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
