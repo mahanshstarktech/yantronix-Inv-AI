@@ -51,6 +51,7 @@ class ZohoPayloadBuilder:
 
         name = ai_product.get("product_title", "Unnamed Product")
         dims = self._dimensions(ai_product)
+        rate = self._selling_price(ai_product)
         payload: Dict[str, Any] = {
             "name": name,
             "url": self._slugify(name),
@@ -67,8 +68,8 @@ class ZohoPayloadBuilder:
             "tags": self._tags(ai_product),
             "variants": [
                 {
-                    "rate": self._selling_price(ai_product),
-                    "label_rate": self._label_rate(ai_product),
+                    "rate": rate,
+                    "label_rate": self._label_rate(ai_product, rate),
                     "sku": ai_product.get("sku", ""),
                     "initial_stock": "0",
                     "reorder_level": "5",
@@ -134,11 +135,17 @@ class ZohoPayloadBuilder:
         return str(price or 0)
 
     @staticmethod
-    def _label_rate(ai_product: Dict[str, Any]) -> str:
+    def _label_rate(ai_product: Dict[str, Any], rate: str) -> str:
         price = ai_product.get("selling_price", {})
+        label = 0.0
         if isinstance(price, dict):
-            return str(price.get("vendor_base_price") or price.get("quartz_base_price") or price.get("final_selling_price") or 0)
-        return "0"
+            label = float(price.get("vendor_base_price") or price.get("quartz_base_price") or price.get("final_selling_price") or 0)
+        
+        rate_float = float(rate) if rate else 0.0
+        # Zoho requires MRP (label_rate) to be >= Selling Price (rate)
+        if label < rate_float:
+            return rate
+        return str(label)
 
     @staticmethod
     def _dimensions(ai_product: Dict[str, Any]) -> Dict[str, str]:
