@@ -26,6 +26,7 @@ from app.repositories.product_repository import repository
 from app.services.scraper import HtmlTextExtractor, scraper_service
 from app.services.publisher import publisher
 from app.services.zoho_categories import zoho_category_service
+from app.services.zoho_brands import zoho_brand_service
 from app.services.category_suggester import get_category_suggester
 from app.workers.tasks import generate_ai_task
 
@@ -134,6 +135,18 @@ def suggest_category(data: CategorySuggestRequest, request: Request) -> Category
         return CategorySuggestResponse(reasoning=f"Suggestion failed: {str(exc)[:100]}")
 
 
+# ── Brands ────────────────────────────────────────────────────────────────────
+
+@router.get("/brands")
+def get_brands(refresh: bool = False) -> dict:
+    """Fetch all Zoho Commerce brands (cached 10 min)."""
+    try:
+        brands = zoho_brand_service.get_brands(force_refresh=refresh)
+        return {"brands": brands, "total": len(brands)}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 # ── Publishing ────────────────────────────────────────────────────────────────
 
 @router.post("/publish/{product_id}")
@@ -165,6 +178,16 @@ def publish_product(
         
     source_url = raw_doc.get("source_url", "")
     
+    # Brand matching: pull AI-extracted brand and find best Zoho match
+    ai_brand_name = ai_data.get("brand", "")
+    try:
+        matched_brand = zoho_brand_service.find_best_match(ai_brand_name)
+        brand_name = matched_brand.get("name", "Generic")
+        brand_id = matched_brand.get("brand_id", "")
+    except Exception:
+        brand_name = "Generic"
+        brand_id = ""
+    
     # Calculate Year string like "2627"
     now = datetime.datetime.now()
     year1 = str(now.year)[-2:]
@@ -179,7 +202,9 @@ def publish_product(
         ai_data, 
         category_id=body.category_id, 
         source_url=source_url, 
-        generated_sku=sku_str
+        generated_sku=sku_str,
+        brand_name=brand_name,
+        brand_id=brand_id,
     )
 
     # Save audit trail (best-effort — never fail the request because of this)
