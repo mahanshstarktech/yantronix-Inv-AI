@@ -1,0 +1,33 @@
+# railway.toml — defines the services Railway will deploy from this repo.
+# Docs: https://docs.railway.com/reference/config-as-code
+
+[build]
+builder = "NIXPACKS"
+
+# ── FastAPI Web Service ───────────────────────────────────────────────────────
+[[services]]
+name = "api"
+source = { rootDirectory = "backend" }
+
+[services.build]
+buildCommand = "pip install -r requirements.txt"
+
+[services.deploy]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+
+# ── Celery Worker ─────────────────────────────────────────────────────────────
+[[services]]
+name = "worker"
+source = { rootDirectory = "backend" }
+
+[services.build]
+buildCommand = "pip install -r requirements.txt"
+
+[services.deploy]
+startCommand = "python -m celery -A app.workers.celery_app worker --loglevel=info --pool=solo"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

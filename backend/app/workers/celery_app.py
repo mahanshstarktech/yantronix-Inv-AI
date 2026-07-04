@@ -10,5 +10,5 @@ celery_app = Celery(
     "yantronix",
     broker  = os.getenv("REDIS_URL", "redis://localhost:6379/0"),
     backend = os.getenv("REDIS_URL", "redis://localhost:6379/0"),
-    include = ["app.workers.tasks", "tasks"],
+    include = ["app.workers.tasks"],
 )

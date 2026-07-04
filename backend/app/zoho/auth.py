@@ -114,13 +114,18 @@ class ZohoAuth:
     def auth_headers(self) -> dict:
         """
         Return the complete HTTP headers dict needed for Zoho Commerce API calls.
-        Includes Authorization and organisation ID.
+        Includes Authorization, organisation ID, and store domain name.
         """
-        return {
+        from app.core.config import settings  # local import avoids circular deps at module load
+
+        headers = {
             "Authorization":                   f"Zoho-oauthtoken {self.get_access_token()}",
             "X-com-zoho-store-organizationid": self._config.ORGANIZATION_ID,
             "Content-Type":                    "application/json",
         }
+        if settings.zoho_store_domain:
+            headers["domain-name"] = settings.zoho_store_domain
+        return headers
 
     def invalidate(self) -> None:
         """

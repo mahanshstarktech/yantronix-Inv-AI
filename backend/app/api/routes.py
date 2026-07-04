@@ -2,26 +2,36 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from typing import Optional
+
+from fastapi import APIRouter, Body, HTTPException, Request
 
 from app.core.config import settings
 from app.core.rate_limiter import LimitPolicy, client_key, rate_limiter
 from app.models.product import (
+    CategorySuggestRequest,
+    CategorySuggestResponse,
+    CategoryTreeResponse,
     ExtractRequest,
     ExtractResponse,
     GenerateRequest,
     GenerateResponse,
     ProductStatus,
+    PublishRequest,
     RawProductData,
     StatusResponse,
 )
 from app.repositories.product_repository import repository
 from app.services.scraper import HtmlTextExtractor, scraper_service
 from app.services.publisher import publisher
+from app.services.zoho_categories import zoho_category_service
+from app.services.category_suggester import get_category_suggester
 from app.workers.tasks import generate_ai_task
 
 router = APIRouter()
 
+
+# ── Scraping ──────────────────────────────────────────────────────────────────
 
 @router.post("/extract", response_model=ExtractResponse)
 def extract_website(data: ExtractRequest, request: Request) -> ExtractResponse:
@@ -33,6 +43,8 @@ def extract_website(data: ExtractRequest, request: Request) -> ExtractResponse:
     )
     return ExtractResponse(**scraper_service.extract(data.url))
 
+
+# ── AI Generation ─────────────────────────────────────────────────────────────
 
 @router.post("/generate", response_model=GenerateResponse)
 def generate_listing(data: GenerateRequest, request: Request) -> GenerateResponse:
@@ -86,9 +98,55 @@ def get_status(product_id: str) -> StatusResponse:
     raise HTTPException(status_code=404, detail="Product not found")
 
 
+# ── Categories ────────────────────────────────────────────────────────────────
+
+@router.get("/categories", response_model=CategoryTreeResponse)
+def get_categories(refresh: bool = False) -> CategoryTreeResponse:
+    """Fetch the full Zoho Commerce category tree (cached 10 min).
+
+    Pass ?refresh=true to force a cache bust.
+    Returns both a tree (for the hierarchical dropdown) and a flat list
+    (for AI suggestion matching).
+    """
+    try:
+        return zoho_category_service.get_categories(force_refresh=refresh)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.post("/categories/suggest", response_model=CategorySuggestResponse)
+def suggest_category(data: CategorySuggestRequest, request: Request) -> CategorySuggestResponse:
+    """Use Gemini to suggest the best Zoho category for a product.
+
+    Accepts the product's title, tags, and keywords alongside the flat
+    categories list and returns the AI-picked category_id, name, confidence,
+    and reasoning string.
+    """
+    rate_limiter.check(
+        client_key(request),
+        LimitPolicy("ai-calls", settings.rate_limit_ai_calls_per_hour, 3600),
+    )
+    try:
+        return get_category_suggester().suggest(data)
+    except Exception as exc:
+        # Non-fatal — return empty suggestion so the UI can still show the dropdown
+        return CategorySuggestResponse(reasoning=f"Suggestion failed: {str(exc)[:100]}")
+
+
+# ── Publishing ────────────────────────────────────────────────────────────────
+
 @router.post("/publish/{product_id}")
-def publish_product(product_id: str, request: Request) -> dict:
-    """Publish a completed AI product to Zoho or return a dry-run payload."""
+def publish_product(
+    product_id: str,
+    request: Request,
+    body: PublishRequest = Body(default_factory=PublishRequest),
+) -> dict:
+    """Publish a completed AI product to Zoho or return a dry-run payload.
+
+    Optionally accepts a JSON body: {"category_id": "123456789"}.
+    If category_id is provided it is included in the Zoho payload and saved
+    in the publish audit log.
+    """
 
     rate_limiter.check(
         client_key(request),
@@ -97,5 +155,71 @@ def publish_product(product_id: str, request: Request) -> dict:
     ai_data = repository.get_ai_product(product_id)
     if not ai_data:
         raise HTTPException(status_code=404, detail="AI product not ready or not found")
-    result = publisher.publish(ai_data)
-    return {"success": True, "result": result}
+
+    result = publisher.publish(ai_data, category_id=body.category_id)
+
+    # Save audit trail (best-effort — never fail the request because of this)
+    repository.save_publish_result(
+        raw_product_id=product_id,
+        result=result,
+        category_id=body.category_id,
+        test_mode=settings.test_mode,
+    )
+
+    zoho_product_id = result.get("zoho_product_id", "")
+    return {
+        "success": True,
+        "zoho_product_id": zoho_product_id,
+        "zoho_id": zoho_product_id,  # kept for frontend compat
+        "category_id": body.category_id,
+        "result": result,
+    }
+
+
+# ── Health & Utilities ────────────────────────────────────────────────────────
+
+@router.get("/health")
+def health_check() -> dict:
+    """Return connectivity status for MongoDB, Redis, and Zoho OAuth."""
+
+    import redis as redis_lib
+    from pymongo import MongoClient
+    from pymongo.errors import ServerSelectionTimeoutError
+
+    checks: dict = {}
+
+    # MongoDB
+    try:
+        client = MongoClient(settings.mongo_uri, serverSelectionTimeoutMS=1500)
+        client.admin.command("ping")
+        checks["mongodb"] = "ok"
+    except Exception as exc:
+        checks["mongodb"] = f"error: {str(exc)[:80]}"
+
+    # Redis
+    try:
+        r = redis_lib.from_url(settings.redis_url, socket_connect_timeout=1)
+        r.ping()
+        checks["redis"] = "ok"
+    except Exception as exc:
+        checks["redis"] = f"error: {str(exc)[:80]}"
+
+    # Zoho OAuth (token refresh test)
+    try:
+        from app.zoho import ZohoAuth
+        auth = ZohoAuth()
+        auth.get_access_token()
+        checks["zoho_oauth"] = "ok"
+    except Exception as exc:
+        checks["zoho_oauth"] = f"error: {str(exc)[:80]}"
+
+    overall = "healthy" if all(v == "ok" for v in checks.values()) else "degraded"
+    return {"status": overall, "checks": checks}
+
+
+@router.get("/products")
+def list_products(limit: int = 50) -> dict:
+    """List all AI-generated products (newest first) for a future dashboard."""
+
+    products = repository.get_all_products(limit=min(limit, 200))
+    return {"products": products, "total": len(products)}

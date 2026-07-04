@@ -63,6 +63,7 @@ class Settings:
 
     test_mode: bool = _bool_env("TEST_MODE", True)
     zoho_api_domain: str = os.getenv("ZOHO_API_DOMAIN", "https://commerce.zoho.in").rstrip("/")
+    zoho_store_domain: str = os.getenv("ZOHO_STORE_DOMAIN", "")
 
 
 settings = Settings()

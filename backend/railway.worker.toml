@@ -1,0 +1,14 @@
+# railway.toml for the Celery worker service
+# This lives in backend/ — when you add the worker as a second service in Railway,
+# point it to the same repo with root directory = backend and it picks up this file.
+# Override the start command in Railway's UI to:
+#   python -m celery -A app.workers.celery_app worker --loglevel=info --pool=solo
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "pip install -r requirements.txt"
+
+[deploy]
+startCommand = "python -m celery -A app.workers.celery_app worker --loglevel=info --pool=solo"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

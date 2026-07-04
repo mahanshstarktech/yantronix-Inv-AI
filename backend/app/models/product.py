@@ -13,6 +13,56 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
+# ── Category models ────────────────────────────────────────────────────────────
+
+class CategoryNode(BaseModel):
+    """A single Zoho Commerce category node, potentially with nested children."""
+
+    category_id: str
+    name: str
+    parent_category_id: str = "0"
+    depth: int = 0
+    visibility: bool = True
+    children: List["CategoryNode"] = Field(default_factory=list)
+
+
+CategoryNode.model_rebuild()  # resolve forward reference
+
+
+class CategoryTreeResponse(BaseModel):
+    """Response for GET /categories: both tree and flat list for different UI uses."""
+
+    tree: List[CategoryNode] = Field(default_factory=list)
+    flat: List[CategoryNode] = Field(default_factory=list)
+    total: int = 0
+    cached: bool = False
+
+
+class CategorySuggestRequest(BaseModel):
+    """Request body for POST /categories/suggest."""
+
+    product_title: str
+    tags: List[str] = Field(default_factory=list)
+    seo_keywords: List[str] = Field(default_factory=list)
+    short_description_html: str = ""
+    categories: List[Dict[str, str]] = Field(default_factory=list)  # [{category_id, name}]
+
+
+class CategorySuggestResponse(BaseModel):
+    """AI-powered category suggestion result."""
+
+    category_id: Optional[str] = None
+    category_name: Optional[str] = None
+    confidence: float = 0.0
+    reasoning: str = ""
+
+
+class PublishRequest(BaseModel):
+    """Optional request body for POST /publish/{product_id}."""
+
+    category_id: Optional[str] = None
+
+
 class ProductStatus(str, Enum):
     """Lifecycle states for a scraped product."""
 

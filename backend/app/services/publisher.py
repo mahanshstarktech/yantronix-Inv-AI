@@ -11,8 +11,8 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.core.config import settings
-from zoho import ZohoAuth
-from zoho.exceptions import ZohoAuthError, ZohoTokenRefreshError
+from app.zoho import ZohoAuth
+from app.zoho.exceptions import ZohoAuthError, ZohoTokenRefreshError
 
 logger = logging.getLogger(__name__)
 
@@ -46,18 +46,19 @@ class ZohoPayloadBuilder:
     def __init__(self, sanitizer: Optional[HtmlSanitizer] = None) -> None:
         self._sanitizer = sanitizer or HtmlSanitizer()
 
-    def build(self, ai_product: Dict[str, Any]) -> Dict[str, Any]:
+    def build(self, ai_product: Dict[str, Any], category_id: Optional[str] = None) -> Dict[str, Any]:
         """Return a Zoho Commerce product payload from an AI product dictionary."""
 
         name = ai_product.get("product_title", "Unnamed Product")
         dims = self._dimensions(ai_product)
-        return {
+        payload: Dict[str, Any] = {
             "name": name,
             "url": self._slugify(name),
             "variant_type": "inventory",
             "show_in_storefront": True,
             "is_returnable": False,
             "is_featured": False,
+            "brand": ai_product.get("brand", ""),
             "product_short_description": self._sanitizer.sanitize(ai_product.get("short_description_html") or ai_product.get("seo_description", "")),
             "product_description": self._sanitizer.sanitize(ai_product.get("long_description_html", "")),
             "seo_title": ai_product.get("seo_title", "")[:70],
@@ -87,6 +88,12 @@ class ZohoPayloadBuilder:
                 }
             ],
         }
+
+        # Attach category if provided
+        if category_id:
+            payload["category_id"] = category_id
+
+        return payload
 
     @staticmethod
     def _slugify(text: str) -> str:
@@ -150,10 +157,10 @@ class ZohoPublisher:
         self._payload_builder = payload_builder or ZohoPayloadBuilder()
         self._auth: Optional[ZohoAuth] = None
 
-    def publish(self, ai_product: Dict[str, Any]) -> Dict[str, Any]:
+    def publish(self, ai_product: Dict[str, Any], category_id: Optional[str] = None) -> Dict[str, Any]:
         """Build and publish a product payload, or return dry-run data in test mode."""
 
-        payload = self._payload_builder.build(ai_product)
+        payload = self._payload_builder.build(ai_product, category_id=category_id)
         if settings.test_mode:
             logger.info("TEST MODE — payload built, not sent to Zoho.")
             print("\n" + "=" * 60)
@@ -165,16 +172,40 @@ class ZohoPublisher:
 
         headers = self._auth_headers()
         api_url = f"{settings.zoho_api_domain}/store/api/v1/products"
+
+        logger.info("Publishing product to Zoho: %s", api_url)
         response = requests.post(api_url, json=payload, headers=headers, timeout=30)
+
         if response.status_code == 401:
+            # Token expired — invalidate and retry once
+            logger.warning("Got 401 from Zoho, refreshing token and retrying...")
             self._get_auth().invalidate()
             response = requests.post(api_url, json=payload, headers=self._auth_headers(), timeout=30)
+
         if not response.ok:
-            raise requests.HTTPError(f"Zoho API error {response.status_code}: {response.text}", response=response)
+            raise requests.HTTPError(
+                f"Zoho API error {response.status_code}: {response.text[:500]}",
+                response=response,
+            )
+
         result = response.json()
-        if result.get("code") != 0:
-            raise ValueError(f"Zoho error code {result.get('code')}: {result.get('message')}")
-        return result
+        # Zoho wraps success in {"code": 0, "message": "success", "product": {...}}
+        code = result.get("code", result.get("status_code", -1))
+        if str(code) not in ("0", "200", "success"):
+            raise ValueError(
+                f"Zoho returned error code={code}: {result.get('message', str(result)[:200])}"
+            )
+
+        # Extract the created product ID for the audit log and response
+        product_data = result.get("product", result.get("payload", {}).get("product", {}))
+        zoho_product_id = str(product_data.get("product_id", "")) if product_data else ""
+
+        logger.info("Product published to Zoho successfully. zoho_product_id=%s", zoho_product_id)
+        return {
+            "success": True,
+            "zoho_product_id": zoho_product_id,
+            "result": result,
+        }
 
     def _auth_headers(self) -> Dict[str, str]:
         """Return Zoho auth headers while preserving detailed auth errors."""

@@ -229,16 +229,16 @@ start_databases
 
 sleep 2
 
-echo "Starting Next.js frontend on http://localhost:3000..."
-npm run dev &
+echo "Starting Vite frontend on http://localhost:5173..."
+(cd "$PROJECT_ROOT/frontend/lazecommerce" && npm run dev) &
 PIDS+=("$!")
 
 echo "Starting FastAPI backend on http://localhost:8000..."
-(cd "$PROJECT_ROOT/backend" && "$VENV_PYTHON" -m uvicorn main:app --reload) &
+(cd "$PROJECT_ROOT/backend" && "$VENV_PYTHON" -m uvicorn app.main:app --reload) &
 PIDS+=("$!")
 
 echo "Starting Celery worker..."
-(cd "$PROJECT_ROOT/backend" && "$VENV_PYTHON" -m celery -A tasks worker --loglevel=info --pool=solo) &
+(cd "$PROJECT_ROOT/backend" && "$VENV_PYTHON" -m celery -A app.workers.celery_app worker --loglevel=info --pool=solo) &
 PIDS+=("$!")
 
 echo "All available components are running. Press Ctrl+C to stop them."

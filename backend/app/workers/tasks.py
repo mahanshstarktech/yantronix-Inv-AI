@@ -5,7 +5,7 @@ from __future__ import annotations
 from app.models.product import ProductStatus
 from app.repositories.product_repository import repository
 from app.services.ai_service import AIGenerationError, get_product_generator
-from celery_app import celery_app
+from .celery_app import celery_app
 
 
 @celery_app.task

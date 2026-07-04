@@ -26,6 +26,7 @@ class ProductRepository:
         self._db = self._client[db_name]
         self.raw_products: Collection = self._db["raw_products"]
         self.ai_products: Collection = self._db["ai_products"]
+        self.publish_log: Collection = self._db["publish_log"]
 
     def ensure_indexes(self) -> None:
         """Create indexes used by duplicate checks and status lookups.
@@ -39,6 +40,8 @@ class ProductRepository:
             self.raw_products.create_index("source_url")
             self.raw_products.create_index("status")
             self.ai_products.create_index("raw_product_id", unique=True)
+            self.publish_log.create_index("raw_product_id")
+            self.publish_log.create_index("published_at")
         except Exception:
             pass
 
@@ -133,6 +136,48 @@ class ProductRepository:
             return self.raw_products.find_one({"_id": ObjectId(product_id)})
         except Exception:
             return None
+
+    def save_publish_result(
+        self,
+        raw_product_id: str,
+        result: Dict[str, Any],
+        category_id: Optional[str] = None,
+        test_mode: bool = False,
+    ) -> None:
+        """Record a publish event for audit trail."""
+
+        now = datetime.now(timezone.utc)
+        try:
+            self.publish_log.insert_one({
+                "raw_product_id": ObjectId(raw_product_id),
+                "published_at": now,
+                "category_id": category_id,
+                "test_mode": test_mode,
+                "result": result,
+            })
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("Failed to save publish log: %s", exc)
+
+    def get_all_products(self, limit: int = 100) -> list:
+        """Return a list of all AI-generated products for a future dashboard."""
+
+        try:
+            docs = list(
+                self.ai_products.find({}, {"ai_data.product_title": 1, "raw_product_id": 1, "created_at": 1})
+                .sort("created_at", -1)
+                .limit(limit)
+            )
+            return [
+                {
+                    "product_id": str(d["raw_product_id"]),
+                    "product_title": d.get("ai_data", {}).get("product_title", "Untitled"),
+                    "created_at": d.get("created_at", "").isoformat() if d.get("created_at") else "",
+                }
+                for d in docs
+            ]
+        except Exception:
+            return []
 
 
 repository = ProductRepository(settings.mongo_uri, settings.mongo_db_name)
