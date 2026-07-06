@@ -119,15 +119,26 @@ class ZohoPayloadBuilder:
     @staticmethod
     def _seo_keywords(ai_product: Dict[str, Any]) -> str:
         keywords = ai_product.get("seo_keywords", [])
+        flat_list = []
         if isinstance(keywords, list):
-            return ", ".join(str(keyword) for keyword in keywords)
-        if isinstance(keywords, dict):
-            flattened: List[str] = []
+            flat_list = [str(k) for k in keywords]
+        elif isinstance(keywords, dict):
             for group in keywords.values():
                 if isinstance(group, list):
-                    flattened.extend(str(keyword) for keyword in group)
-            return ", ".join(flattened)
-        return str(keywords)
+                    flat_list.extend(str(k) for k in group)
+        else:
+            flat_list = [str(keywords)]
+
+        # Build comma-separated string within 700 character limit
+        result = ""
+        for keyword in flat_list:
+            addition = f", {keyword}" if result else keyword
+            if len(result) + len(addition) <= 700:
+                result += addition
+            else:
+                break
+                
+        return result
 
     @staticmethod
     def _selling_price(ai_product: Dict[str, Any]) -> str:
