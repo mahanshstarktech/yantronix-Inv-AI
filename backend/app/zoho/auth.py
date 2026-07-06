@@ -86,11 +86,15 @@ class ZohoAuth:
     _REFRESH_BUFFER_SECONDS = 300
     # Default request timeout (connect, read) in seconds
     _TIMEOUT = (5, 15)
+    
+    # Class-level cache and lock so all instances share the same token
+    _shared_cache = _TokenCache()
+    _shared_lock = threading.Lock()
 
     def __init__(self, config: ZohoConfig | None = None):
         self._config  = config or ZohoConfig.load()
-        self._cache   = _TokenCache()
-        self._lock    = threading.Lock()      # prevents thundering herd on refresh
+        self._cache   = self.__class__._shared_cache
+        self._lock    = self.__class__._shared_lock
         self._session = _build_session()
 
         logger.info(
