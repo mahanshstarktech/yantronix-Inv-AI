@@ -219,21 +219,28 @@ def publish_product(
     year2 = str(now.year + 1)[-2:]
     year_str = f"{year1}{year2}"
     
-    # Get sequence 0150, 0151...
-    seq = repository.get_next_sku_sequence(f"sku_seq_{now.year}")
-    sku_str = f"YTX{year_str}{seq:04d}"
+    max_retries = 5
+    for attempt in range(max_retries):
+        # Get sequence 0150, 0151...
+        seq = repository.get_next_sku_sequence(f"sku_seq_{now.year}")
+        sku_str = f"YTX{year_str}{seq:04d}"
 
-    try:
-        result = publisher.publish(
-            ai_data, 
-            category_id=body.category_id, 
-            source_url=source_url, 
-            generated_sku=sku_str,
-            brand_name=brand_name,
-            brand_id=brand_id,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Failed to publish to Zoho: {str(exc)}")
+        try:
+            result = publisher.publish(
+                ai_data, 
+                category_id=body.category_id, 
+                source_url=source_url, 
+                generated_sku=sku_str,
+                brand_name=brand_name,
+                brand_id=brand_id,
+            )
+            break  # Success!
+        except Exception as exc:
+            error_msg = str(exc)
+            # If Zoho complains about the SKU already existing, and we have retries left, loop again
+            if attempt < max_retries - 1 and "SKU" in error_msg and "already exists" in error_msg:
+                continue
+            raise HTTPException(status_code=400, detail=f"Failed to publish to Zoho: {error_msg}")
 
     # Save audit trail (best-effort — never fail the request because of this)
     repository.save_publish_result(
