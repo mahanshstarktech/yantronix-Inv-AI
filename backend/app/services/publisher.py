@@ -140,7 +140,10 @@ class ZohoPayloadBuilder:
     @staticmethod
     def _label_rate(ai_product: Dict[str, Any], rate: str) -> str:
         """Retail price = selling price + 5-15% (random), always >= selling price."""
-        rate_float = float(rate) if rate else 0.0
+        try:
+            rate_float = float(str(rate).replace(",", "").strip()) if rate else 0.0
+        except ValueError:
+            rate_float = 0.0
         if rate_float <= 0:
             return rate
         # Add a random 5-15% markup for retail (MRP)

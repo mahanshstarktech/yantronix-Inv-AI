@@ -192,7 +192,14 @@ export async function publish(
     body: JSON.stringify({ category_id: category_id ?? null }),
   });
   if (!res.ok) {
-    throw new Error(`Failed to publish: ${res.statusText}`);
+    let errorMessage = res.statusText;
+    try {
+      const errorData = await res.json();
+      errorMessage = errorData.detail || errorMessage;
+    } catch (e) {
+      // Ignore json parse error
+    }
+    throw new Error(`Failed to publish: ${errorMessage}`);
   }
   const data = await res.json();
 
