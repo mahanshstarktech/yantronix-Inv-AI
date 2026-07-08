@@ -25,7 +25,7 @@ class VendorDetector:
             return "quartz"
         if "robu.in" in host:
             return "robu"
-        raise HTTPException(status_code=400, detail=f"Unsupported vendor: {host}")
+        return "custom"
 
 
 class HtmlTextExtractor:
