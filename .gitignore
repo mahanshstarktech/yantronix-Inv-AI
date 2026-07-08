@@ -49,3 +49,8 @@ next-env.d.ts
 *.njsproj
 *.sln
 *.sw?
+
+# Temporary Scripts
+update_zoho_prices.py
+
+seed/
