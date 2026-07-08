@@ -12,13 +12,13 @@ def build_ai_prompt(product: Dict[str, Any], max_raw_text_chars: int) -> str:
     source_url = product.get("source_url", "")
     pricing = product.get("pricing") or {}
     quartz_price = float(pricing.get("base_price") or 0)
-    selling_price = float(pricing.get("selling_price") or round(quartz_price * 1.18 * 1.05, 2))
+    selling_price = float(pricing.get("selling_price") or round(quartz_price * 1.05, 2))
 
     price_hint = ""
     if quartz_price:
         price_hint = (
             f"KNOWN SUPPLIER BASE PRICE : ₹{quartz_price}\n"
-            f"CALCULATED SELLING PRICE: ₹{selling_price} (formula: base × 1.18 GST × 1.05 margin)\n"
+            f"CALCULATED SELLING PRICE: ₹{selling_price} (formula: base × 1.05 margin)\n"
         )
 
     return f"""
@@ -65,7 +65,7 @@ OUTPUT FORMAT (all fields required):
 STRICT RULES:
 1. Extract real supplier facts when present. Do not invent chip names, voltage ratings, or dimensions.
 2. If a value is missing, estimate only weight/dimensions/pricing realistically; otherwise use empty string or 0.
-3. Pricing formula: after_gst = base × 1.18, after_margin = after_gst × 1.05. Round to 2 decimals.
+3. Pricing formula: after_margin = base × 1.05, final_selling_price = after_margin. Round to 2 decimals.
 4. HSN examples: sensors/modules 854370, PCB kits 853400, power modules 850440, RF modules 852691.
 5. `tags` must be a flat list: product type, chip/interface, use cases, compatible boards, audience, India terms.
 6. `seo_keywords` must be a flat list: short-tail, long-tail, buy/shop phrases, India price terms.
