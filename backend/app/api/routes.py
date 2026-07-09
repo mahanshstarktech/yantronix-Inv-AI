@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Request
-from pydantic import HttpUrl
+from pydantic import HttpUrl, BaseModel
 from bson import ObjectId
 from app.core.config import settings
 from app.core.rate_limiter import LimitPolicy, client_key, rate_limiter
@@ -21,8 +21,10 @@ from app.models.product import (
     PublishRequest,
     RawProductData,
     StatusResponse,
+    MarketplaceSyncRequest
 )
 from app.repositories.product_repository import repository
+from app.services.appwrite_service import push_to_sync_queue
 from app.services.scraper import HtmlTextExtractor, scraper_service
 from app.services.publisher import publisher
 from app.services.zoho_categories import zoho_category_service
@@ -307,3 +309,25 @@ def list_products(limit: int = 50) -> dict:
 
     products = repository.get_all_products(limit=min(limit, 200))
     return {"products": products, "total": len(products)}
+
+@router.post("/publish-to-marketplaces")
+async def trigger_marketplace_sync(request: MarketplaceSyncRequest):
+    try:
+        result = push_to_sync_queue(request.product_id, request.marketplace)
+        
+        doc_id = "Unknown"
+        if isinstance(result, dict):
+            doc_id = result.get("$id", "Success")
+        elif hasattr(result, "$id"):
+            doc_id = getattr(result, "$id")
+        elif hasattr(result, "id"):
+            doc_id = getattr(result, "id")
+            
+        return {
+            "success": True, 
+            "message": "Data pushed to Appwrite. Cloud Engine triggered!", 
+            "document_id": doc_id
+        }
+    except Exception as e:
+        print(f"❌ Route Crash Info: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed with error: {str(e)}")

@@ -210,3 +210,7 @@ class RawProductData(BaseModel):
         """Return a plain dictionary safe for MongoDB insertion."""
 
         return self.model_dump(mode="json")
+
+class MarketplaceSyncRequest(BaseModel):
+    product_id: str
+    marketplace: str
