@@ -207,6 +207,13 @@ def publish_product(
     ai_brand_name = ai_data.get("brand", "")
     try:
         matched_brand = zoho_brand_service.find_best_match(ai_brand_name)
+        
+        # If celery worker just created the brand, it might not be in our FastAPI process cache yet.
+        # So if we get Generic but ai_brand_name is specific, invalidate cache and retry.
+        if matched_brand.get("name") == "Generic" and ai_brand_name and ai_brand_name.lower() != "generic":
+            zoho_brand_service.invalidate_cache()
+            matched_brand = zoho_brand_service.find_best_match(ai_brand_name)
+
         brand_name = matched_brand.get("name", "Generic")
         brand_id = matched_brand.get("brand_id", "")
     except Exception:
