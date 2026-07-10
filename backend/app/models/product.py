@@ -142,7 +142,7 @@ class AIProduct(BaseModel):
     hsn_code: str = ""
     sku: str = ""
     brand: str = ""
-    weight_kg: Union[float, str] = 0.0
+    weight_g: Union[float, str] = 0.0
     dimensions_cm: Union[str, Dimensions] = ""
     selling_price: SellingPrice = Field(default_factory=SellingPrice)
     tags: List[str] = Field(default_factory=list)

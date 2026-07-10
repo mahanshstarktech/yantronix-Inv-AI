@@ -39,14 +39,14 @@ SOURCE URL: {source_url}
 
 OUTPUT FORMAT (all fields required):
 {{
-  "product_title": "Full descriptive title: Brand ProductName – Key Spec (ChipName, Interface) – Use Case",
+  "product_title": "Use the exact product name from the supplier page. Do not add 'Generic'. Remove any vendor names like 'Quartz', 'Robu', or 'Jaiman Toys' from the title.",
   "seo_title": "60–70 character keyword-rich SEO title",
   "meta_description": "150–160 character meta description with specs and CTA",
   "seo_description": "2–3 sentence SEO paragraph for an India/Yantronix product page",
   "hsn_code": "6-digit GST HSN code",
   "sku": "SKU extracted from page or inferred from product name/model",
   "brand": "Exact brand name as printed on product/page. Use 'Generic' only if truly absent.",
-  "weight_kg": 0.025,
+  "weight_g": 25,
   "dimensions_cm": "L × W × H in cm, for example 3.2 × 1.4 × 0.8",
   "selling_price": {{
     "quartz_base_price": 0.0,
