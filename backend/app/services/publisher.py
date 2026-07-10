@@ -60,7 +60,7 @@ class ZohoPayloadBuilder:
             "show_in_storefront": True,
             "is_returnable": False,
             "is_featured": False,
-            "unit": "Nos",
+            "unit": "PCS",
             "brand": brand_name or ai_product.get("brand", "") or "Generic",
             "product_short_description": self._sanitizer.sanitize(ai_product.get("short_description_html") or ai_product.get("seo_description", "")),
             "product_description": self._sanitizer.sanitize(ai_product.get("long_description_html", "")),
@@ -83,7 +83,7 @@ class ZohoPayloadBuilder:
                     "part_number": "",
                     "custom_fields": self._build_custom_fields(source_url),
                     "package_details": {
-                        "weight": str(ai_product.get("weight_kg", "")),
+                        "weight": str(ai_product.get("weight_g", ai_product.get("weight_kg", ""))),
                         "height": dims["H"],
                         "length": dims["L"],
                         "width": dims["W"],

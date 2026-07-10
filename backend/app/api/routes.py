@@ -221,9 +221,14 @@ def publish_product(
     
     max_retries = 5
     for attempt in range(max_retries):
-        # Get sequence 0150, 0151...
-        seq = repository.get_next_sku_sequence(f"sku_seq_{now.year}")
-        sku_str = f"YTX{year_str}{seq:04d}"
+        if attempt == 0:
+            sku_str = ai_data.get("sku")
+            if not sku_str:
+                seq = repository.get_next_sku_sequence(f"sku_seq_{now.year}")
+                sku_str = f"YTX{year_str}{seq:04d}"
+        else:
+            seq = repository.get_next_sku_sequence(f"sku_seq_{now.year}")
+            sku_str = f"YTX{year_str}{seq:04d}"
 
         try:
             result = publisher.publish(

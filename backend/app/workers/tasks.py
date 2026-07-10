@@ -24,6 +24,16 @@ def generate_ai_task(product_id: str) -> None:
     repository.mark_status(product_id, ProductStatus.PROCESSING)
     try:
         ai_product = get_product_generator().generate(product)
+        
+        # Generate SKU immediately so the frontend can preview it
+        import datetime
+        now = datetime.datetime.now()
+        year1 = str(now.year)[-2:]
+        year2 = str(now.year + 1)[-2:]
+        year_str = f"{year1}{year2}"
+        seq = repository.get_next_sku_sequence(f"sku_seq_{now.year}")
+        ai_product["sku"] = f"YTX{year_str}{seq:04d}"
+
         repository.save_ai_product(product_id, ai_product)
         print(f"[INFO] AI product saved for product_id={product_id}")
     except (AIGenerationError, RuntimeError) as exc:
