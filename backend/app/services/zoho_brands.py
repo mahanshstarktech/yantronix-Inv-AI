@@ -81,6 +81,37 @@ class ZohoBrandService:
         self._cache = None
         self._cached_at = 0.0
 
+    def create_brand(self, brand_name: str) -> Dict[str, Any]:
+        """Create a new brand in Zoho Commerce."""
+        if not brand_name or brand_name.lower() == "generic":
+            return GENERIC_BRAND
+
+        api_url = f"{settings.zoho_api_domain}/store/api/v1/brands"
+        headers = self._get_auth_headers()
+        payload = {"name": brand_name}
+        
+        logger.info("Auto-creating brand in Zoho: %s", brand_name)
+        try:
+            resp = requests.post(api_url, headers=headers, json=payload, timeout=15)
+        except requests.RequestException as exc:
+            logger.error("Failed to create brand in Zoho: %s", exc)
+            return GENERIC_BRAND
+
+        if resp.status_code == 401:
+            self._get_auth().invalidate()
+            headers = self._get_auth_headers()
+            resp = requests.post(api_url, headers=headers, json=payload, timeout=15)
+
+        if resp.ok:
+            data = resp.json()
+            brand_data = data.get("brand", {})
+            if brand_data:
+                self.invalidate_cache()
+                return brand_data
+
+        logger.error("Zoho returned error creating brand: %s %s", resp.status_code, resp.text[:200])
+        return GENERIC_BRAND
+
     # ── Private ───────────────────────────────────────────────────────────────
 
     def _fetch_all_brands(self) -> List[Dict[str, Any]]:

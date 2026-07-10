@@ -369,7 +369,7 @@ function ReviewDashboard({
             Zoho Fields Preview
           </h3>
           <div className="space-y-2.5 font-mono text-[11px]">
-            <Row k="Unit" v="Nos" accent />
+            <Row k="Unit" v="PCS" accent />
             <Row k="Brand → Zoho" v={matchedBrand?.name ?? "Matching…"} accent={matchedBrand?.name !== "Generic"} />
             <Row k="Company Division" v="Yantronix" accent />
             <div className="flex justify-between gap-2">
