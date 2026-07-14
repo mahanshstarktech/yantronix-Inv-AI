@@ -20,6 +20,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     application.include_router(router)
+
+    @application.get("/health", tags=["System"])
+    def health_check() -> dict[str, str]:
+        """Lightweight endpoint for cron-job.org to keep the server awake."""
+        return {"status": "ok"}
+
     return application
 
 
