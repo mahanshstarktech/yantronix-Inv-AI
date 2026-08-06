@@ -1,39 +1,51 @@
-export const onRequest: PagesFunction<{ SITE_PASSWORD: string }> = async (context) => {
-  const { request, env, next } = context;
-  const url = new URL(request.url);
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
-  // 1. Get the password from Cloudflare Environment Variables
-  const EXPECTED_PASSWORD = env.SITE_PASSWORD || 'default_secret';
+export async function middleware(request: NextRequest) {
+  const url = request.nextUrl;
 
-  // 2. Check if the user is submitting a password via POST
+  // Skip password check for Next.js internal files and static assets
+  if (url.pathname.startsWith('/_next') || url.pathname.includes('.')) {
+    return NextResponse.next();
+  }
+
+  // Get the password from Environment Variables (injected by Cloudflare)
+  const EXPECTED_PASSWORD = process.env.SITE_PASSWORD || 'default_secret';
+
+  // 1. Check if the user is submitting a password via POST
+  let isError = false;
   if (request.method === 'POST') {
-    const formData = await request.formData();
-    const submittedPassword = formData.get('password');
+    try {
+      const formData = await request.formData();
+      const submittedPassword = formData.get('password');
 
-    if (submittedPassword === EXPECTED_PASSWORD) {
-      // Password is correct, set a cookie for 30 days and redirect to the same page
-      const response = new Response(null, {
-        status: 302,
-        headers: {
-          'Location': url.pathname,
-          'Set-Cookie': `auth_token=true; Path=/; HttpOnly; Secure; Max-Age=${60 * 60 * 24 * 30}`,
-        },
-      });
-      return response;
+      if (submittedPassword === EXPECTED_PASSWORD) {
+        // Password is correct, set a cookie for 30 days and redirect to the same page to drop the POST method
+        const response = NextResponse.redirect(new URL(url.pathname, request.url));
+        response.cookies.set('auth_token', 'true', {
+          path: '/',
+          httpOnly: true,
+          secure: true,
+          maxAge: 60 * 60 * 24 * 30, // 30 days
+        });
+        return response;
+      } else {
+        isError = true;
+      }
+    } catch (e) {
+      isError = true;
     }
   }
 
-  // 3. Check if the user already has the auth cookie
-  const cookieHeader = request.headers.get('Cookie');
-  if (cookieHeader && cookieHeader.includes('auth_token=true')) {
-    // They are authenticated, let them through to the actual site
-    return next();
+  // 2. Check if the user already has the auth cookie
+  const authCookie = request.cookies.get('auth_token');
+  if (authCookie && authCookie.value === 'true') {
+    // They are authenticated, let them through to the Next.js app
+    return NextResponse.next();
   }
 
-  // 4. If not authenticated (or wrong password), return the Password Page
-  const isError = request.method === 'POST';
-  
-  return new Response(`
+  // 3. If not authenticated, return the Password Page
+  const html = `
     <!DOCTYPE html>
     <html lang="en">
     <head>
@@ -64,7 +76,10 @@ export const onRequest: PagesFunction<{ SITE_PASSWORD: string }> = async (contex
       </div>
     </body>
     </html>
-  `, {
+  `;
+
+  return new Response(html, {
+    status: isError ? 401 : 401,
     headers: { 'Content-Type': 'text/html' }
   });
-};
+}
