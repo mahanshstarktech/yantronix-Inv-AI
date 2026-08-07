@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PipelineShell } from "@/components/pipeline/PipelineShell";
 import { BootScreen } from "@/components/pipeline/BootScreen";
@@ -31,11 +31,16 @@ function PipelinePage() {
   const [productId, setProductId] = useState<string | null>(null);
   const [data, setData] = useState<ProductData | null>(null);
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  
+  // NEW: Store marketplace selections at the top level
+  const [sendToAmazon, setSendToAmazon] = useState(false);
+  const [sendToFlipkart, setSendToFlipkart] = useState(false);
 
-  const pipelineId = useMemo(
-    () => "PX-" + Math.floor(10000 + Math.random() * 89999),
-    []
-  );
+  const [pipelineId, setPipelineId] = useState("PX-00000");
+
+  useEffect(() => {
+    setPipelineId("PX-" + Math.floor(10000 + Math.random() * 89999));
+  }, []);
 
   function reset() {
     setUrl("");
@@ -44,6 +49,8 @@ function PipelinePage() {
     setProductId(null);
     setData(null);
     setCategoryId(null);
+    setSendToAmazon(false); // NEW: Reset selections
+    setSendToFlipkart(false); // NEW: Reset selections
     setStep("extract");
   }
 
@@ -75,10 +82,13 @@ function PipelinePage() {
               initialData={data}
               initialProductId={productId}
               onProductId={setProductId}
-              onApprove={(d, pid, catId) => {
+              // UPDATE: Accept amazon/flipkart selections here
+              onApprove={(d, pid, catId, amazon, flipkart) => {
                 setData(d);
                 setProductId(pid);
                 setCategoryId(catId);
+                setSendToAmazon(amazon);
+                setSendToFlipkart(flipkart);
                 setStep("publish");
               }}
             />
@@ -88,6 +98,9 @@ function PipelinePage() {
               productId={productId}
               productTitle={data.product_title}
               categoryId={categoryId}
+              // UPDATE: Pass selections down to the final publishing screen
+              sendToAmazon={sendToAmazon}
+              sendToFlipkart={sendToFlipkart}
               onReset={reset}
             />
           )}

@@ -61,6 +61,8 @@ class PublishRequest(BaseModel):
     """Optional request body for POST /publish/{product_id}."""
 
     category_id: Optional[str] = None
+    amazon: bool = False      
+    flipkart: bool = False    
 
 
 class ProductStatus(str, Enum):

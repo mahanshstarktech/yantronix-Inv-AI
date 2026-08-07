@@ -1,52 +1,93 @@
-import warnings
+import os
+from dotenv import load_dotenv
 from appwrite.client import Client
+from appwrite.query import Query  
 from appwrite.services.databases import Databases
 from appwrite.id import ID
 
-APPWRITE_ENDPOINT = "https://sgp.cloud.appwrite.io/v1"
-APPWRITE_PROJECT_ID = "6a4cfba4003dab2e4e75"
-APPWRITE_API_KEY = "standard_d0dfe984105bce7d3a48d947ddde48fc4f290a941adca4c3cd287c6d92253d848a71c5352b7cc4c2f0df0b6f6fbfd671eb16b2eb92949ab4ceb0569e159801524722269025d8a9aa3c50a84c27feae422865b0771807cd62eb8fec1b217fe80aa9f3469da0fef7d08e471744b5863927292e4847fccdfa791f96ff50b968872c"
-DATABASE_ID = "6a4cfe93003921333e93"
-COLLECTION_ID = "6a4cff4f001d99867db7"
+# Force load the environment variables into memory immediately
+load_dotenv()
 
-# Initialize Client
+# 1. Initialize the Appwrite Client
 client = Client()
-client.set_endpoint(APPWRITE_ENDPOINT)
-client.set_project(APPWRITE_PROJECT_ID)
-client.set_key(APPWRITE_API_KEY)
+client.set_endpoint(os.getenv("APPWRITE_ENDPOINT", "https://sgp.cloud.appwrite.io/v1"))
 
+# Fetch the Project ID and strictly apply it
+project_id = os.getenv("APPWRITE_PROJECT_ID")
+if not project_id:
+    print("CRITICAL ERROR: APPWRITE_PROJECT_ID is empty. Check your .env file.")
+
+client.set_project(project_id)
+client.set_key(os.getenv("APPWRITE_API_KEY"))
+
+# 2. Initialize the Databases Service
 databases = Databases(client)
 
-def push_to_sync_queue(product_id: str, marketplace: str) -> dict:
+def push_to_appwrite(product_data: dict):
     """
-    Persists a new synchronization task in the Appwrite database, 
-    which acts as an event trigger for the serverless cloud engine.
-    
-    Args:
-        product_id (str): Unique identifier of the product to be synced.
-        marketplace (str): Target marketplace(s) for synchronization.
-        
-    Returns:
-        dict: The created database document payload containing the system-generated $id.
+    Pushes the AI generated product data to the Appwrite ProductsCatalog.
+    Uses SKU to update existing records or creates a new one if it doesn't exist.
     """
     try:
-        # Suppressing the misleading DeprecationWarning from the current SDK version
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=DeprecationWarning)
-            
-            # Reverting to the stable method that successfully executes the cloud trigger
-            result = databases.create_document(
-                database_id=DATABASE_ID,
-                collection_id=COLLECTION_ID,
-                document_id=ID.unique(),
-                data={
-                    "product_id": product_id,
-                    "marketplace": marketplace,
-                    "status": "Pending-Sync"
-                }
+        database_id = os.getenv("APPWRITE_DATABASE_ID")
+        collection_id = os.getenv("APPWRITE_COLLECTION_ID")
+        sku = product_data.get("sku")
+
+        # 1. Search for existing document by SKU
+        existing = databases.list_documents(
+            database_id=database_id,
+            collection_id=collection_id,
+            queries=[Query.equal("sku", sku)]
+        )
+
+        if existing.total > 0:
+            # 2. Update existing document
+            doc_id = existing.documents[0].id
+            result = databases.update_document(
+                database_id=database_id,
+                collection_id=collection_id,
+                document_id=doc_id,
+                data=product_data
             )
-            return result
+            print(f"Successfully updated product {sku} in Appwrite.")
+        else:
+            # 3. Create new document
+            result = databases.create_document(
+                database_id=database_id,
+                collection_id=collection_id,
+                document_id=sku, # Use SKU as ID for easy future lookups
+                data=product_data
+            )
+            print(f"Successfully created product {sku} in Appwrite.")
+            
+        return result
+
     except Exception as e:
-        # Log critical persistence failures for debugging
-        print(f"❌ [AppwriteService] Persistence Error: {str(e)}")
-        raise e
+        print(f"Appwrite Insertion Error: {str(e)}")
+        return None
+    
+def push_to_sync_queue(product_id: str, sku: str, marketplace_array: list):
+    try:
+        database_id = os.getenv("APPWRITE_DATABASE_ID")
+        collection_id = os.getenv("APPWRITE_SYNC_COLLECTION_ID")
+        
+        # Ensure marketplace_array is definitely a list
+        if not isinstance(marketplace_array, list):
+            marketplace_array = [marketplace_array]
+        
+        sync_payload = {
+            "product_id": product_id,
+            "sku": str(sku),
+            "marketplaces": marketplace_array, # This is the array
+            "status": "Pending-Sync"
+        }
+        
+        return databases.create_document(
+            database_id=database_id,
+            collection_id=collection_id,
+            document_id=ID.unique(),
+            data=sync_payload
+        )
+    except Exception as e:
+        print(f"Appwrite Sync Queue Error: {str(e)}")
+        return None

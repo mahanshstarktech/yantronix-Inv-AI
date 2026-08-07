@@ -7,27 +7,34 @@ export function PublishStep({
   productId,
   productTitle,
   categoryId,
+  sendToAmazon,     // NEW: Received from index.tsx
+  sendToFlipkart,   // NEW: Received from index.tsx
   onReset,
 }: {
   productId: string;
   productTitle: string;
   categoryId: string | null;
+  sendToAmazon: boolean;   // NEW: Type definition fix
+  sendToFlipkart: boolean; // NEW: Type definition fix
   onReset: () => void;
 }) {
   const [done, setDone] = useState(false);
   const [zohoId, setZohoId] = useState<string | null>(null);
   const started = useRef(false);
-
   const [error, setError] = useState<string | null>(null);
 
+  // Automatically start publishing when this page loads
   useEffect(() => {
     if (started.current) return;
     started.current = true;
+    
     (async () => {
       try {
-        const r = await publish(productId, categoryId);
-        setZohoId(r.zoho_id);
+        // Sending all data including amazon/flipkart choices to the backend
+        const r = await publish(productId, categoryId, sendToAmazon, sendToFlipkart);
+        setZohoId(r.zoho_id ?? null);
         setDone(true);
+        
         const burst = (originX: number) =>
           confetti({
             particleCount: 80,
@@ -40,10 +47,10 @@ export function PublishStep({
         setTimeout(() => burst(0.5), 500);
       } catch (err: any) {
         console.error("Publish failed:", err);
-        setError(err.message || "Failed to publish to Zoho");
+        setError(err.message || "Failed to publish to selected marketplaces");
       }
     })();
-  }, [productId, categoryId]);
+  }, [productId, categoryId, sendToAmazon, sendToFlipkart]);
 
   return (
     <div className="min-h-[70vh] grid place-items-center px-4">
@@ -60,9 +67,7 @@ export function PublishStep({
                   <svg viewBox="0 0 24 24" fill="none" className="size-8 text-red-500">
                     <path
                       d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
+                      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
                     />
                   </svg>
                 </div>
@@ -89,10 +94,7 @@ export function PublishStep({
                     <svg viewBox="0 0 24 24" fill="none" className="size-10 text-accent-secondary">
                       <path
                         d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
+                        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
                       />
                     </svg>
                   </div>
@@ -101,11 +103,18 @@ export function PublishStep({
                   Uplink Active
                 </span>
                 <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight mb-2">
-                  Publishing to Zoho
+                  Publishing Data...
                 </h2>
                 <p className="font-mono text-xs text-zinc-500">
-                  Authenticating → Uploading payload → Confirming receipt…
+                  Transmitting payload to selected marketplaces → Confirming receipt…
                 </p>
+                
+                {/* Visual feedback of what is being published */}
+                <div className="flex justify-center gap-3 mt-6">
+                  <span className="px-3 py-1 rounded bg-zinc-800 text-xs text-zinc-300">Zoho</span>
+                  {sendToAmazon && <span className="px-3 py-1 rounded bg-zinc-800 text-xs text-zinc-300">Amazon</span>}
+                  {sendToFlipkart && <span className="px-3 py-1 rounded bg-zinc-800 text-xs text-zinc-300">Flipkart</span>}
+                </div>
               </>
             )}
           </>
@@ -123,18 +132,11 @@ export function PublishStep({
                   animate={{ pathLength: 1 }}
                   transition={{ duration: 0.5, delay: 0.2 }}
                   d="M5 13l4 4L19 7"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                  stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
                 />
               </svg>
             </motion.div>
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-            >
+            <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
               <span className="inline-block px-2 py-0.5 rounded bg-accent-primary/10 border border-accent-primary/20 text-[10px] text-accent-primary font-mono uppercase mb-3">
                 Pipeline Complete
               </span>
@@ -142,14 +144,13 @@ export function PublishStep({
                 Published successfully
               </h2>
               <p className="text-sm text-zinc-400 mb-1 truncate">{productTitle}</p>
-              <p className="font-mono text-xs text-zinc-500 mb-8">
-                Zoho ID:{" "}
-                <span className="text-accent-secondary">{zohoId}</span> · Product:{" "}
-                <span className="text-accent-secondary">{productId}</span>
-                {categoryId && (
-                  <> · Category ID: <span className="text-accent-secondary">{categoryId}</span></>
-                )}
-              </p>
+              
+              <div className="flex justify-center gap-2 mt-4 mb-8">
+                <span className="px-2 py-1 rounded bg-zinc-800 text-xs text-zinc-400">✅ Zoho</span>
+                {sendToAmazon && <span className="px-2 py-1 rounded bg-zinc-800 text-xs text-zinc-400">✅ Amazon</span>}
+                {sendToFlipkart && <span className="px-2 py-1 rounded bg-zinc-800 text-xs text-zinc-400">✅ Flipkart</span>}
+              </div>
+
               <motion.button
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}

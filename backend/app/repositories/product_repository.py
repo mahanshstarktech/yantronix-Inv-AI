@@ -162,7 +162,9 @@ class ProductRepository:
         raw_product_id: str,
         result: Dict[str, Any],
         category_id: Optional[str] = None,
-        test_mode: bool = False,
+        test_mode: bool = False, 
+        amazon_synced: bool = False,
+        flipkart_synced: bool = False
     ) -> None:
         """Record a publish event for audit trail."""
 
@@ -173,6 +175,8 @@ class ProductRepository:
                 "published_at": now,
                 "category_id": category_id,
                 "test_mode": test_mode,
+                "amazon_synced": amazon_synced,     
+                "flipkart_synced": flipkart_synced, 
                 "result": result,
             })
         except Exception as exc:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Optional
-
+from fastapi import APIRouter
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Request
 from pydantic import HttpUrl, BaseModel
 from bson import ObjectId
@@ -24,7 +24,7 @@ from app.models.product import (
     MarketplaceSyncRequest
 )
 from app.repositories.product_repository import repository
-from app.services.appwrite_service import push_to_sync_queue
+from app.services.appwrite_service import push_to_appwrite, push_to_sync_queue
 from app.services.scraper import HtmlTextExtractor, scraper_service
 from app.services.publisher import publisher
 from app.services.zoho_categories import zoho_category_service
@@ -57,8 +57,7 @@ def generate_listing(data: GenerateRequest, request: Request) -> GenerateRespons
 
     caller = client_key(request)
     rate_limiter.check(caller, LimitPolicy("generate", settings.rate_limit_generate_per_minute, 60))
-    rate_limiter.check(caller, LimitPolicy("ai-calls", settings.rate_limit_ai_calls_per_hour, 3600))
-
+    rate_limiter.check(caller, LimitPolicy("ai-calls", settings.rate_limit_ai_calls_per_hour, 3600))    
     raw_text = HtmlTextExtractor.sanitize_text(data.raw_text)
     if not raw_text.strip():
         raise HTTPException(status_code=400, detail="raw_text is empty.")
@@ -184,7 +183,7 @@ def publish_product(
 ) -> dict:
     """Publish a completed AI product to Zoho or return a dry-run payload.
 
-    Optionally accepts a JSON body: {"category_id": "123456789"}.
+    Optionally accepts a JSON body: {"category_id": "123456789", "amazon": true, "flipkart": false}.
     If category_id is provided it is included in the Zoho payload and saved
     in the publish audit log.
     """
@@ -235,6 +234,8 @@ def publish_product(
                 generated_sku=sku_str,
                 brand_name=brand_name,
                 brand_id=brand_id,
+                send_to_amazon=body.amazon,      # NEW: Pass flag to publisher
+                send_to_flipkart=body.flipkart   # NEW: Pass flag to publisher
             )
             break  # Success!
         except Exception as exc:
@@ -250,17 +251,74 @@ def publish_product(
         result=result,
         category_id=body.category_id,
         test_mode=settings.test_mode,
+        amazon_synced=body.amazon,      # NEW: Save selection to Database
+        flipkart_synced=body.flipkart   # NEW: Save selection to Database
     )
 
     zoho_product_id = result.get("zoho_product_id", "")
+
+# ==========================================
+    # NEW: AUTOMATIC APPWRITE SYNC
+    # ==========================================
+    try:
+        # Extract the first variant for pricing
+        variants = ai_data.get("variants", [{}])
+        first_variant = variants[0] if variants else {}
+        
+        # Parse prices safely: look for rate/label_rate, default to 0.0 if missing
+        base_price = float(first_variant.get("rate") or 0.0)
+        selling_price = float(first_variant.get("label_rate") or 0.0)
+        
+        # Resolve title: prioritize 'name', fallback to 'product_title'
+        product_title = ai_data.get("name") or ai_data.get("product_title", "Untitled Product")
+        
+        # Split comma-separated keywords into an array
+        raw_keywords = ai_data.get("seo_keyword", "")
+        keyword_array = [k.strip() for k in raw_keywords.split(",")] if raw_keywords else []
+
+        # Determine the active marketplaces
+        active_marketplaces = ["Zoho"] # Zoho is always included
+        if body.amazon:
+            active_marketplaces.append("Amazon")
+        if body.flipkart:
+            active_marketplaces.append("Flipkart")
+
+        appwrite_payload = {
+            "sku": sku_str,
+            "title": str(product_title)[:255], 
+            "base_price": base_price,
+            "final_selling_price": selling_price,
+            "tags": ai_data.get("tags", []),
+            "seo_keywords": keyword_array,
+            "meta_description": ai_data.get("seo_description", "")[:1000],
+            "marketplaces": active_marketplaces # This stores everything in one row
+        }
+        
+        # 1. Update the Catalog
+        push_to_appwrite(appwrite_payload)
+        
+        # 2. Trigger the Marketplace Sync only if flags are True
+        # Ensure SKU exists before queueing
+        if sku_str:
+            if getattr(body, 'amazon', False):
+                push_to_sync_queue(product_id, sku_str, ["Amazon"])
+            if getattr(body, 'flipkart', False):
+                push_to_sync_queue(product_id, sku_str, ["Flipkart"])
+        else:
+            print("Sync Error: Attempted to queue a product with no SKU.")
+        
+    except Exception as e:
+        print(f"Appwrite Sync Warning: {str(e)}")
+    # ==========================================
     return {
         "success": True,
         "zoho_product_id": zoho_product_id,
         "zoho_id": zoho_product_id,  # kept for frontend compat
         "category_id": body.category_id,
+        "amazon_published": body.amazon,      # NEW: Return status to frontend
+        "flipkart_published": body.flipkart,  # NEW: Return status to frontend
         "result": result,
     }
-
 
 # ── Health & Utilities ────────────────────────────────────────────────────────
 
@@ -310,14 +368,16 @@ def list_products(limit: int = 50) -> dict:
     products = repository.get_all_products(limit=min(limit, 200))
     return {"products": products, "total": len(products)}
 
+# Appwrite and Marketplace Sync Integration
+
 @router.post("/publish-to-marketplaces")
 async def trigger_marketplace_sync(request: MarketplaceSyncRequest):
     try:
-        result = push_to_sync_queue(request.product_id, request.marketplace)
-        
+        result = push_to_sync_queue(request.product_id, request.marketplace)        
         doc_id = "Unknown"
         if isinstance(result, dict):
-            doc_id = result.get("$id", "Success")
+            doc_id = result.get("$id", result.get("id", "Success"))
+        # Safely handle Appwrite object responses without crashing on missing attributes
         elif hasattr(result, "$id"):
             doc_id = getattr(result, "$id")
         elif hasattr(result, "id"):
@@ -325,9 +385,25 @@ async def trigger_marketplace_sync(request: MarketplaceSyncRequest):
             
         return {
             "success": True, 
-            "message": "Data pushed to Appwrite. Cloud Engine triggered!", 
+            "message": "Data pushed to Appwrite. Cloud Engine triggered.", 
             "document_id": doc_id
         }
     except Exception as e:
-        print(f"❌ Route Crash Info: {str(e)}")
+        print(f"Route Crash Info: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed with error: {str(e)}")
+        
+
+@router.post("/publish")
+async def publish_product_to_appwrite(product_payload: dict):
+    # Pass the incoming payload directly to the Appwrite controller
+    appwrite_result = push_to_appwrite(product_payload)
+    
+    if appwrite_result:
+        return {
+            "status": "success", 
+            "message": "Product published to Appwrite", 
+            "data": appwrite_result
+        }
+    else:
+        # Returns a 400 status if the Appwrite insertion fails
+        raise HTTPException(status_code=400, detail="Failed to save to Appwrite")

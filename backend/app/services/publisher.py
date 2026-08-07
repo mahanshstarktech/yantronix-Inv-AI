@@ -214,7 +214,17 @@ class ZohoPublisher:
         self._payload_builder = payload_builder or ZohoPayloadBuilder()
         self._auth: Optional[ZohoAuth] = None
 
-    def publish(self, ai_product: Dict[str, Any], category_id: Optional[str] = None, source_url: str = "", generated_sku: str = "", brand_name: str = "", brand_id: str = "") -> Dict[str, Any]:
+    def publish(
+        self, 
+        ai_product: Dict[str, Any], 
+        category_id: Optional[str] = None, 
+        source_url: str = "", 
+        generated_sku: str = "", 
+        brand_name: str = "", 
+        brand_id: str = "",
+        send_to_amazon: bool = False,      # NEW: Accept Amazon flag
+        send_to_flipkart: bool = False     # NEW: Accept Flipkart flag
+    ) -> Dict[str, Any]:
         """Build and publish a product payload, or return dry-run data in test mode."""
 
         payload = self._payload_builder.build(
@@ -225,15 +235,24 @@ class ZohoPublisher:
             brand_name=brand_name,
             brand_id=brand_id,
         )
+        
         if settings.test_mode:
             logger.info("TEST MODE — payload built, not sent to Zoho.")
             print("\n" + "=" * 60)
             print("🧪 TEST MODE — Zoho payload (not sent):")
             print("=" * 60)
             print(json.dumps(payload, indent=2, ensure_ascii=False))
+            print(f"📦 Amazon Sync Requested: {send_to_amazon}")
+            print(f"🛍️ Flipkart Sync Requested: {send_to_flipkart}")
             print("=" * 60 + "\n")
-            return {"test_mode": True, "payload": payload}
+            return {
+                "test_mode": True, 
+                "payload": payload,
+                "amazon_synced": send_to_amazon,
+                "flipkart_synced": send_to_flipkart
+            }
 
+        # 1. ZOHO PUBLISHING LOGIC
         headers = self._auth_headers()
         api_url = f"{settings.zoho_api_domain}/store/api/v1/products"
 
@@ -263,17 +282,32 @@ class ZohoPublisher:
         # Extract the created product ID for the audit log and response
         product_data = result.get("product", result.get("payload", {}).get("product", {}))
         zoho_product_id = str(product_data.get("product_id", "")) if product_data else ""
-
         logger.info("Product published to Zoho successfully. zoho_product_id=%s", zoho_product_id)
+
+
+        # 2. AMAZON PUBLISHING LOGIC (Placeholder)
+        if send_to_amazon:
+            logger.info(f"Initiating Amazon sync for SKU: {generated_sku}")
+            # TODO: Add actual Amazon SP-API logic here in the future
+            print(f"✅ [Simulated] Product '{generated_sku}' successfully sent to Amazon.")
+
+        # 3. FLIPKART PUBLISHING LOGIC (Placeholder)
+        if send_to_flipkart:
+            logger.info(f"Initiating Flipkart sync for SKU: {generated_sku}")
+            # TODO: Add actual Flipkart API logic here in the future
+            print(f"✅ [Simulated] Product '{generated_sku}' successfully sent to Flipkart.")
+
+
         return {
             "success": True,
             "zoho_product_id": zoho_product_id,
+            "amazon_synced": send_to_amazon,      # NEW: Returning status
+            "flipkart_synced": send_to_flipkart,  # NEW: Returning status
             "result": result,
         }
 
     def _auth_headers(self) -> Dict[str, str]:
         """Return Zoho auth headers while preserving detailed auth errors."""
-
         try:
             return self._get_auth().auth_headers()
         except (ZohoAuthError, ZohoTokenRefreshError):
@@ -282,7 +316,6 @@ class ZohoPublisher:
 
     def _get_auth(self) -> ZohoAuth:
         """Create ZohoAuth lazily so dry-run mode does not require credentials."""
-
         if self._auth is None:
             self._auth = ZohoAuth()
         return self._auth

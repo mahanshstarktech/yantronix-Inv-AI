@@ -36,7 +36,7 @@ export function GenerateStep({
   initialData: ProductData | null;
   initialProductId: string | null;
   onProductId: (id: string) => void;
-  onApprove: (data: ProductData, productId: string, categoryId: string | null) => void;
+  onApprove: (data: ProductData, productId: string, categoryId: string | null, sendToAmazon: boolean, sendToFlipkart: boolean) => void;
 }) {
   const [phase, setPhase] = useState<Phase>(initialData ? "review" : "submitting");
   const [productId, setProductId] = useState<string | null>(initialProductId);
@@ -182,7 +182,7 @@ export function GenerateStep({
       selectedCategory={selectedCategory}
       onCategorySelect={setSelectedCategory}
       matchedBrand={matchedBrand}
-      onApprove={() => onApprove(data, productId!, selectedCategory?.category_id ?? null)}
+      onApprove={(sendToAmazon, sendToFlipkart) => onApprove(data, productId!, selectedCategory?.category_id ?? null, sendToAmazon, sendToFlipkart)}
     />
   );
 }
@@ -305,10 +305,15 @@ function ReviewDashboard({
   selectedCategory: SelectedCategory | null;
   onCategorySelect: (cat: SelectedCategory) => void;
   matchedBrand: ZohoBrand | null;
-  onApprove: () => void;
+  // DHYAN DEIN: onApprove ab amazon aur flipkart ka data accept karega
+  onApprove: (sendToAmazon: boolean, sendToFlipkart: boolean) => void; 
 }) {
   const set = <K extends keyof ProductData>(k: K, v: ProductData[K]) =>
     onChange({ ...data, [k]: v });
+
+  // New States for Marketplaces
+  const [sendToAmazon, setSendToAmazon] = useState(false);
+  const [sendToFlipkart, setSendToFlipkart] = useState(false);
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 md:gap-8">
@@ -417,13 +422,42 @@ function ReviewDashboard({
             <span className="inline-block px-2 py-0.5 rounded bg-accent-primary/10 border border-accent-primary/20 text-[10px] text-accent-primary font-mono uppercase mb-2">
               Generation Complete
             </span>
-            <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight">
+            <h2 className="text-2xl md:text-3xl font-bold text-white tracking-tight mb-4">
               Review & Approve Listing
             </h2>
+            
+            {/* NEW: Checkboxes for Marketplaces Desktop */}
+            <div className="flex items-center gap-6 mt-2 p-3 bg-zinc-900/50 border border-zinc-800 rounded-lg w-max">
+              <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Publish To:</span>
+              <label className="flex items-center gap-2 cursor-pointer opacity-70">
+                <input type="checkbox" checked disabled className="size-4 accent-accent-primary" />
+                <span className="text-sm font-medium text-white">Zoho (Default)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition">
+                <input 
+                  type="checkbox" 
+                  checked={sendToAmazon} 
+                  onChange={(e) => setSendToAmazon(e.target.checked)} 
+                  className="size-4 accent-accent-primary" 
+                />
+                <span className="text-sm font-medium text-white">Amazon</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition">
+                <input 
+                  type="checkbox" 
+                  checked={sendToFlipkart} 
+                  onChange={(e) => setSendToFlipkart(e.target.checked)} 
+                  className="size-4 accent-accent-primary" 
+                />
+                <span className="text-sm font-medium text-white">Flipkart</span>
+              </label>
+            </div>
+
           </div>
           <div className="hidden md:block">
-            <ApproveButton onClick={onApprove}>
-              Approve & Publish to Zoho
+            {/* NEW: Updated onApprove and button text */}
+            <ApproveButton onClick={() => onApprove(sendToAmazon, sendToFlipkart)}>
+              Approve & Proceed to Publish
             </ApproveButton>
           </div>
         </div>
@@ -579,11 +613,28 @@ function ReviewDashboard({
 
       {/* mobile bottom action bar */}
       <div className="md:hidden fixed bottom-0 inset-x-0 p-3 bg-brand-bg/90 backdrop-blur-xl border-t border-zinc-800 z-40">
+        {/* NEW: Mobile Checkboxes */}
+        <div className="flex justify-center gap-4 mb-3">
+          <label className="flex items-center gap-1.5 opacity-70">
+            <input type="checkbox" checked disabled className="size-3 accent-accent-primary" />
+            <span className="text-xs font-medium text-white">Zoho</span>
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={sendToAmazon} onChange={(e) => setSendToAmazon(e.target.checked)} className="size-3 accent-accent-primary" />
+            <span className="text-xs font-medium text-white">Amazon</span>
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="checkbox" checked={sendToFlipkart} onChange={(e) => setSendToFlipkart(e.target.checked)} className="size-3 accent-accent-primary" />
+            <span className="text-xs font-medium text-white">Flipkart</span>
+          </label>
+        </div>
+        
+        {/* NEW: Updated mobile button */}
         <button
-          onClick={onApprove}
+          onClick={() => onApprove(sendToAmazon, sendToFlipkart)}
           className="w-full py-3 rounded-lg bg-accent-primary text-brand-bg text-sm font-bold uppercase tracking-wider"
         >
-          Approve & Publish to Zoho
+          Approve & Proceed to Publish
         </button>
       </div>
     </div>

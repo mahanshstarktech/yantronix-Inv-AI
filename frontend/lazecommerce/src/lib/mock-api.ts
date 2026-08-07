@@ -174,10 +174,12 @@ export async function suggestCategory(
   return res.json();
 }
 
-/** Publish the product to Zoho, optionally with a specific category_id. */
+/** Publish the product to Zoho, optionally with a specific category_id and other marketplaces. */
 export async function publish(
   product_id: string,
-  category_id?: string | null
+  category_id?: string | null,
+  sendToAmazon: boolean = false,     // NEW: Accept Amazon flag
+  sendToFlipkart: boolean = false    // NEW: Accept Flipkart flag
 ): Promise<{
   success: boolean;
   product_id?: string;
@@ -186,11 +188,17 @@ export async function publish(
   message?: string;
   result?: any;
 }> {
+  // NEW: Send amazon and flipkart status in the request body
   const res = await fetch(`${API_BASE_URL}/publish/${product_id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ category_id: category_id ?? null }),
+    body: JSON.stringify({ 
+      category_id: category_id ?? null,
+      amazon: sendToAmazon,
+      flipkart: sendToFlipkart
+    }),
   });
+  
   if (!res.ok) {
     let errorMessage = res.statusText;
     try {
