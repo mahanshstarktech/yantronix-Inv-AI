@@ -242,8 +242,8 @@ class ZohoPublisher:
             print("🧪 TEST MODE — Zoho payload (not sent):")
             print("=" * 60)
             print(json.dumps(payload, indent=2, ensure_ascii=False))
-            print(f"📦 Amazon Sync Requested: {send_to_amazon}")
-            print(f"🛍️ Flipkart Sync Requested: {send_to_flipkart}")
+            print(f"Amazon Sync Requested: {send_to_amazon}")
+            print(f"Flipkart Sync Requested: {send_to_flipkart}")
             print("=" * 60 + "\n")
             return {
                 "test_mode": True, 
