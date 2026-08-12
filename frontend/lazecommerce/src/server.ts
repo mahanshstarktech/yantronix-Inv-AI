@@ -185,10 +185,11 @@ function renderLoginPage(isError: boolean): string {
 </body>
 </html>`;
 }
+// ── Site password — change this string to update the password ──────────────
+const SITE_PASSWORD = "getThisShitDone";
 
 async function handleAuthRequest(
   request: Request,
-  env: Record<string, string>,
 ): Promise<Response | null> {
   const url = new URL(request.url);
   const pathname = url.pathname;
@@ -203,9 +204,8 @@ async function handleAuthRequest(
     try {
       const formData = await request.formData();
       const submittedPassword = formData.get("password") as string;
-      const expectedPassword = env.SITE_PASSWORD || "default_secret";
 
-      if (submittedPassword === expectedPassword) {
+      if (submittedPassword === SITE_PASSWORD) {
         // Correct — set cookie and redirect to home
         return new Response(null, {
           status: 302,
@@ -261,10 +261,7 @@ export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       // ── Auth gate — runs BEFORE everything else ──────────────────────
-      const authResponse = await handleAuthRequest(
-        request,
-        (env || {}) as Record<string, string>,
-      );
+      const authResponse = await handleAuthRequest(request);
       if (authResponse) return authResponse;
 
       // ── Normal app flow ──────────────────────────────────────────────
