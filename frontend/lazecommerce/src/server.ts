@@ -186,9 +186,39 @@ function renderLoginPage(isError: boolean): string {
 </html>`;
 }
 
+// Try every place Cloudflare / Nitro might stash the env bindings
+function getSitePassword(env: Record<string, unknown>): string {
+  // 1. Direct from the fetch() env param (raw Cloudflare Workers)
+  if (env?.SITE_PASSWORD && typeof env.SITE_PASSWORD === "string") {
+    return env.SITE_PASSWORD;
+  }
+  // 2. Nitro sometimes nests bindings under env.cloudflare or env.cf
+  const cf = (env as any)?.cloudflare?.env ?? (env as any)?.cf?.env;
+  if (cf?.SITE_PASSWORD) return cf.SITE_PASSWORD;
+
+  // 3. process.env (Nitro polyfill / build-time injection)
+  try {
+    if (typeof process !== "undefined" && process.env?.SITE_PASSWORD) {
+      return process.env.SITE_PASSWORD;
+    }
+  } catch (_) {/* process may not exist */}
+
+  // 4. globalThis (some Cloudflare presets put vars here)
+  try {
+    if ((globalThis as any).SITE_PASSWORD) {
+      return (globalThis as any).SITE_PASSWORD;
+    }
+    if ((globalThis as any).__env__?.SITE_PASSWORD) {
+      return (globalThis as any).__env__.SITE_PASSWORD;
+    }
+  } catch (_) {/* ignore */}
+
+  return "default_secret";
+}
+
 async function handleAuthRequest(
   request: Request,
-  env: Record<string, string>,
+  env: Record<string, unknown>,
 ): Promise<Response | null> {
   const url = new URL(request.url);
   const pathname = url.pathname;
@@ -203,7 +233,7 @@ async function handleAuthRequest(
     try {
       const formData = await request.formData();
       const submittedPassword = formData.get("password") as string;
-      const expectedPassword = env.SITE_PASSWORD || "default_secret";
+      const expectedPassword = getSitePassword(env);
 
       if (submittedPassword === expectedPassword) {
         // Correct — set cookie and redirect to home
@@ -263,7 +293,7 @@ export default {
       // ── Auth gate — runs BEFORE everything else ──────────────────────
       const authResponse = await handleAuthRequest(
         request,
-        (env || {}) as Record<string, string>,
+        (env || {}) as Record<string, unknown>,
       );
       if (authResponse) return authResponse;
 
