@@ -185,40 +185,11 @@ function renderLoginPage(isError: boolean): string {
 </body>
 </html>`;
 }
-
-// Try every place Cloudflare / Nitro might stash the env bindings
-function getSitePassword(env: Record<string, unknown>): string {
-  // 1. Direct from the fetch() env param (raw Cloudflare Workers)
-  if (env?.SITE_PASSWORD && typeof env.SITE_PASSWORD === "string") {
-    return env.SITE_PASSWORD;
-  }
-  // 2. Nitro sometimes nests bindings under env.cloudflare or env.cf
-  const cf = (env as any)?.cloudflare?.env ?? (env as any)?.cf?.env;
-  if (cf?.SITE_PASSWORD) return cf.SITE_PASSWORD;
-
-  // 3. process.env (Nitro polyfill / build-time injection)
-  try {
-    if (typeof process !== "undefined" && process.env?.SITE_PASSWORD) {
-      return process.env.SITE_PASSWORD;
-    }
-  } catch (_) {/* process may not exist */}
-
-  // 4. globalThis (some Cloudflare presets put vars here)
-  try {
-    if ((globalThis as any).SITE_PASSWORD) {
-      return (globalThis as any).SITE_PASSWORD;
-    }
-    if ((globalThis as any).__env__?.SITE_PASSWORD) {
-      return (globalThis as any).__env__.SITE_PASSWORD;
-    }
-  } catch (_) {/* ignore */}
-
-  return "default_secret";
-}
+// ── Site password — change this string to update the password ──────────────
+const SITE_PASSWORD = "getThisShitDone";
 
 async function handleAuthRequest(
   request: Request,
-  env: Record<string, unknown>,
 ): Promise<Response | null> {
   const url = new URL(request.url);
   const pathname = url.pathname;
@@ -233,9 +204,8 @@ async function handleAuthRequest(
     try {
       const formData = await request.formData();
       const submittedPassword = formData.get("password") as string;
-      const expectedPassword = getSitePassword(env);
 
-      if (submittedPassword === expectedPassword) {
+      if (submittedPassword === SITE_PASSWORD) {
         // Correct — set cookie and redirect to home
         return new Response(null, {
           status: 302,
@@ -291,10 +261,7 @@ export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
       // ── Auth gate — runs BEFORE everything else ──────────────────────
-      const authResponse = await handleAuthRequest(
-        request,
-        (env || {}) as Record<string, unknown>,
-      );
+      const authResponse = await handleAuthRequest(request);
       if (authResponse) return authResponse;
 
       // ── Normal app flow ──────────────────────────────────────────────
