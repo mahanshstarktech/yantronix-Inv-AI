@@ -26,7 +26,7 @@ export function PublishStep({
     (async () => {
       try {
         const r = await publish(productId, categoryId);
-        setZohoId(r.zoho_id);
+        setZohoId(r.zoho_id ?? null);
         setDone(true);
         const burst = (originX: number) =>
           confetti({
