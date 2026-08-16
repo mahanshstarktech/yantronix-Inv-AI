@@ -53,7 +53,7 @@ class Settings:
     gemini_max_output_tokens: int = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "12000"))
     max_raw_text_chars: int = int(os.getenv("MAX_RAW_TEXT_CHARS", "12000"))
 
-    scrape_timeout_seconds: int = int(os.getenv("SCRAPE_TIMEOUT_SECONDS", "15"))
+    scrape_timeout_seconds: int = int(os.getenv("SCRAPE_TIMEOUT_SECONDS", "30"))
     min_scraped_text_chars: int = int(os.getenv("MIN_SCRAPED_TEXT_CHARS", "100"))
 
     rate_limit_extract_per_minute: int = int(os.getenv("RATE_LIMIT_EXTRACT_PER_MINUTE", "10"))
