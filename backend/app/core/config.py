@@ -55,6 +55,9 @@ class Settings:
 
     scrape_timeout_seconds: int = int(os.getenv("SCRAPE_TIMEOUT_SECONDS", "30"))
     min_scraped_text_chars: int = int(os.getenv("MIN_SCRAPED_TEXT_CHARS", "100"))
+    # Optional: ScraperAPI key for bypassing Cloudflare on datacenter IPs (e.g. Render).
+    # Free tier: 5,000 req/month. Sign up at https://www.scraperapi.com
+    scraper_api_key: str = os.getenv("SCRAPER_API_KEY", "")
 
     rate_limit_extract_per_minute: int = int(os.getenv("RATE_LIMIT_EXTRACT_PER_MINUTE", "10"))
     rate_limit_generate_per_minute: int = int(os.getenv("RATE_LIMIT_GENERATE_PER_MINUTE", "5"))
