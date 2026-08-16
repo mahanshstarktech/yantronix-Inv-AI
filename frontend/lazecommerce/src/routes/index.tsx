@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useId } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PipelineShell } from "@/components/pipeline/PipelineShell";
 import { BootScreen } from "@/components/pipeline/BootScreen";
@@ -32,9 +32,10 @@ function PipelinePage() {
   const [data, setData] = useState<ProductData | null>(null);
   const [categoryId, setCategoryId] = useState<string | null>(null);
 
+  const uid = useId();
   const pipelineId = useMemo(
-    () => "PX-" + Math.floor(10000 + Math.random() * 89999),
-    []
+    () => "PX-" + uid.replace(/:/g, "").slice(0, 5),
+    [uid]
   );
 
   function reset() {
