@@ -366,7 +366,7 @@ class ZohoImageUploader:
         headers.pop("Content-Type", None)
 
         files = {
-            "file": (filename, io.BytesIO(image_bytes), content_type),
+            "image": (filename, io.BytesIO(image_bytes), content_type),
         }
 
         upload_resp = requests.post(api_url, headers=headers, files=files, timeout=30)
