@@ -6,10 +6,12 @@ import {
   getCategories,
   suggestCategory,
   getBrands,
+  scanImages,
   type ProductData,
   type CategoryNode,
   type CategorySuggestResponse,
   type ZohoBrand,
+  type ImageScanResult,
 } from "@/lib/mock-api";
 import { ApproveButton } from "./ApproveButton";
 import { CategorySelector, type SelectedCategory } from "./CategorySelector";
@@ -29,14 +31,16 @@ export function GenerateStep({
   source,
   initialData,
   initialProductId,
+  scrapedImages,
   onProductId,
   onApprove,
 }: {
   source: { vendor: string; source_url: string; raw_text: string };
   initialData: ProductData | null;
   initialProductId: string | null;
+  scrapedImages: string[];
   onProductId: (id: string) => void;
-  onApprove: (data: ProductData, productId: string, categoryId: string | null) => void;
+  onApprove: (data: ProductData, productId: string, categoryId: string | null, approvedImages: string[]) => void;
 }) {
   const [phase, setPhase] = useState<Phase>(initialData ? "review" : "submitting");
   const [productId, setProductId] = useState<string | null>(initialProductId);
@@ -54,6 +58,13 @@ export function GenerateStep({
   // Brand state
   const [brands, setBrands] = useState<ZohoBrand[]>([]);
   const [matchedBrand, setMatchedBrand] = useState<ZohoBrand | null>(null);
+
+  // Image review state
+  const [imageScanResults, setImageScanResults] = useState<ImageScanResult[]>([]);
+  const [imageStates, setImageStates] = useState<Record<string, "approved" | "rejected">>({});
+  const [imageScanning, setImageScanning] = useState(false);
+  const [imageScanError, setImageScanError] = useState<string | null>(null);
+  const imageScanStartedRef = useRef(false);
 
   // kick off generate
   useEffect(() => {
@@ -103,6 +114,37 @@ export function GenerateStep({
   }, [phase, productId]);
 
   // If we already have initialData, load categories immediately
+  useEffect(() => {
+    if (initialData && phase === "review" && categoryFlat.length === 0) {
+      loadCategories(initialData);
+    }
+  }, []);
+
+  // Trigger image scan when review phase starts (only once)
+  useEffect(() => {
+    if (phase !== "review" || imageScanStartedRef.current || scrapedImages.length === 0) return;
+    imageScanStartedRef.current = true;
+    (async () => {
+      setImageScanning(true);
+      setImageScanError(null);
+      try {
+        const results = await scanImages(scrapedImages);
+        setImageScanResults(results);
+        // Initialise toggle state: flagged → rejected, clean → approved
+        const initial: Record<string, "approved" | "rejected"> = {};
+        for (const r of results) {
+          initial[r.url] = r.flagged ? "rejected" : "approved";
+        }
+        setImageStates(initial);
+      } catch (err: any) {
+        setImageScanError(err.message || "Image scan failed");
+      } finally {
+        setImageScanning(false);
+      }
+    })();
+  }, [phase, scrapedImages]);
+
+  // If initialData + images already present, kick off scan immediately
   useEffect(() => {
     if (initialData && phase === "review" && categoryFlat.length === 0) {
       loadCategories(initialData);
@@ -167,6 +209,10 @@ export function GenerateStep({
     return <ProcessingPanel />;
   }
 
+  const approvedImageUrls = imageScanResults
+    .filter((r) => imageStates[r.url] === "approved")
+    .map((r) => r.url);
+
   return (
     <ReviewDashboard
       data={data}
@@ -182,7 +228,17 @@ export function GenerateStep({
       selectedCategory={selectedCategory}
       onCategorySelect={setSelectedCategory}
       matchedBrand={matchedBrand}
-      onApprove={() => onApprove(data, productId!, selectedCategory?.category_id ?? null)}
+      imageScanResults={imageScanResults}
+      imageStates={imageStates}
+      imageScanning={imageScanning}
+      imageScanError={imageScanError}
+      onToggleImage={(url) =>
+        setImageStates((prev) => ({
+          ...prev,
+          [url]: prev[url] === "approved" ? "rejected" : "approved",
+        }))
+      }
+      onApprove={() => onApprove(data, productId!, selectedCategory?.category_id ?? null, approvedImageUrls)}
     />
   );
 }
@@ -290,6 +346,11 @@ function ReviewDashboard({
   selectedCategory,
   onCategorySelect,
   matchedBrand,
+  imageScanResults,
+  imageStates,
+  imageScanning,
+  imageScanError,
+  onToggleImage,
   onApprove,
 }: {
   data: ProductData;
@@ -305,6 +366,11 @@ function ReviewDashboard({
   selectedCategory: SelectedCategory | null;
   onCategorySelect: (cat: SelectedCategory) => void;
   matchedBrand: ZohoBrand | null;
+  imageScanResults: ImageScanResult[];
+  imageStates: Record<string, "approved" | "rejected">;
+  imageScanning: boolean;
+  imageScanError: string | null;
+  onToggleImage: (url: string) => void;
   onApprove: () => void;
 }) {
   const set = <K extends keyof ProductData>(k: K, v: ProductData[K]) =>
@@ -574,6 +640,17 @@ function ReviewDashboard({
               </div>
             </div>
           </div>
+
+          {/* Image Review Panel — full-width row */}
+          <div className="lg:col-span-2">
+            <ImageReviewPanel
+              results={imageScanResults}
+              states={imageStates}
+              scanning={imageScanning}
+              scanError={imageScanError}
+              onToggle={onToggleImage}
+            />
+          </div>
         </div>
       </section>
 
@@ -685,3 +762,157 @@ function ChipEditor({
     </div>
   );
 }
+
+// ── Image Review Panel ────────────────────────────────────────────────────────
+
+function ImageReviewPanel({
+  results,
+  states,
+  scanning,
+  scanError,
+  onToggle,
+}: {
+  results: ImageScanResult[];
+  states: Record<string, "approved" | "rejected">;
+  scanning: boolean;
+  scanError: string | null;
+  onToggle: (url: string) => void;
+}) {
+  // If no images were scraped at all, don't render the panel
+  if (!scanning && results.length === 0 && !scanError) return null;
+
+  const approvedCount = results.filter((r) => states[r.url] === "approved").length;
+  const rejectedCount = results.filter((r) => states[r.url] === "rejected").length;
+
+  return (
+    <div className="bg-brand-panel border border-zinc-800 rounded-xl overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-mono font-bold uppercase tracking-widest text-white">
+            Product Images
+          </span>
+          {scanning && (
+            <span className="flex items-center gap-1.5 text-[10px] font-mono text-accent-primary">
+              <span className="size-1.5 rounded-full bg-accent-primary animate-pulse" />
+              OCR Scanning…
+            </span>
+          )}
+          {!scanning && results.length > 0 && (
+            <span className="text-[10px] font-mono text-zinc-500">
+              {results.length} found
+            </span>
+          )}
+        </div>
+        {!scanning && results.length > 0 && (
+          <div className="flex items-center gap-3 text-[11px] font-mono">
+            <span className="flex items-center gap-1.5 text-emerald-400">
+              <span className="size-2 rounded-full bg-emerald-500" />
+              {approvedCount} approved
+            </span>
+            <span className="flex items-center gap-1.5 text-red-400">
+              <span className="size-2 rounded-full bg-red-500" />
+              {rejectedCount} rejected
+            </span>
+            <span className="text-zinc-600">· click any image to toggle</span>
+          </div>
+        )}
+      </div>
+
+      {/* Body */}
+      <div className="p-5">
+        {/* Scanning skeleton */}
+        {scanning && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div
+                key={i}
+                className="aspect-square rounded-lg bg-zinc-900 border border-zinc-800 animate-pulse"
+                style={{ animationDelay: `${i * 0.1}s` }}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Error */}
+        {scanError && !scanning && (
+          <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400 font-mono">
+            ⚠ Image scan failed: {scanError}
+          </div>
+        )}
+
+        {/* Results grid */}
+        {!scanning && results.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+            {results.map((result) => {
+              const state = states[result.url] ?? (result.flagged ? "rejected" : "approved");
+              const isApproved = state === "approved";
+              return (
+                <motion.button
+                  key={result.url}
+                  onClick={() => onToggle(result.url)}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.96 }}
+                  className={[
+                    "relative group aspect-square rounded-xl overflow-hidden border-2 transition-all duration-300 focus:outline-none",
+                    isApproved
+                      ? "border-emerald-500 shadow-[0_0_16px_rgba(16,185,129,0.35)]"
+                      : "border-red-500 shadow-[0_0_16px_rgba(239,68,68,0.35)]",
+                  ].join(" ")}
+                  title={isApproved ? "Click to reject" : "Click to approve"}
+                >
+                  {/* Image */}
+                  <img
+                    src={result.url}
+                    alt="Product"
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src =
+                        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%2318181b'/%3E%3Ctext x='50' y='55' text-anchor='middle' font-size='12' fill='%2371717a'%3ENo image%3C/text%3E%3C/svg%3E";
+                    }}
+                  />
+
+                  {/* Status overlay badge */}
+                  <div
+                    className={[
+                      "absolute top-1.5 right-1.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full",
+                      isApproved
+                        ? "bg-emerald-500/90 text-white"
+                        : "bg-red-500/90 text-white",
+                    ].join(" ")}
+                  >
+                    {isApproved ? "✓" : "✕"}
+                  </div>
+
+                  {/* Watermark badge (shown when flagged) */}
+                  {result.flagged && (
+                    <div className="absolute bottom-1.5 left-1.5 right-1.5 text-[8px] font-bold uppercase tracking-wider bg-red-600/90 text-white rounded px-1 py-0.5 truncate text-center">
+                      ⚠ {result.matches[0] ?? "Watermark"}
+                    </div>
+                  )}
+
+                  {/* Toggle hint on hover */}
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <span className="text-white text-[10px] font-bold uppercase tracking-widest">
+                      {isApproved ? "Reject" : "Approve"}
+                    </span>
+                  </div>
+                </motion.button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Help text */}
+        {!scanning && results.length > 0 && (
+          <p className="mt-4 text-[10px] font-mono text-zinc-600">
+            Green border = will be uploaded to Zoho. Red border = will be discarded.
+            Watermarked images are auto-flagged red by OCR — you can override any image by clicking it.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+

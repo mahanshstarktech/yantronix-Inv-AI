@@ -16,6 +16,7 @@ export function ExtractStep({
   const [url, setUrl] = useState(initial.url || "https://quartzcomponents.com/products/esp32-wroom-32-module");
   const [vendor, setVendor] = useState(initial.vendor || "Quartzcomponents");
   const [rawText, setRawText] = useState(initial.rawText);
+  const [images, setImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasData, setHasData] = useState(Boolean(initial.rawText));
 
@@ -27,6 +28,7 @@ export function ExtractStep({
       const res = await extract(url);
       setVendor(res.vendor || vendor);
       setRawText(res.raw_text || "");
+      setImages(res.images ?? []);
       setHasData(true);
     } catch (err: any) {
       toast.error(err.message || "Failed to extract");
@@ -125,7 +127,7 @@ export function ExtractStep({
           >
             <ApproveButton
               onClick={() =>
-                onApprove({ url, vendor, raw_text: rawText })
+                onApprove({ url, vendor, raw_text: rawText, images })
               }
             >
               Approve & Generate AI Listing

@@ -23,3 +23,12 @@ python-dotenv>=1.0.0
 # Task queue
 celery>=5.4.0
 redis==4.6.0
+
+# Image scanning — OCR watermark detection (runs on CPU, no GPU needed)
+# torch must be installed before easyocr for Render to resolve it correctly.
+# CPU-only wheel (smaller, no CUDA needed on Render).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+easyocr
+rapidfuzz>=3.9.0
+Pillow>=10.0.0

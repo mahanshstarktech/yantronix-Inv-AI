@@ -7,6 +7,7 @@ export type ExtractResponse = {
   url: string;
   vendor: string;
   raw_text: string;
+  images: string[];  // vendor product image URLs discovered during scrape
 };
 
 export type GenerateResponse = {
@@ -66,6 +67,15 @@ export type ZohoBrand = {
   name: string;
 };
 
+/** Per-image result from the backend OCR watermark scan. */
+export type ImageScanResult = {
+  url: string;
+  flagged: boolean;       // true = watermark detected (show red)
+  matches: string[];      // which vendor keywords were matched
+  ocr_texts: string[];    // all text strings OCR found in the image
+  error?: string;         // set if image could not be downloaded/scanned
+};
+
 // ── API functions ─────────────────────────────────────────────────────────────
 
 export async function extract(url: string): Promise<ExtractResponse> {
@@ -75,14 +85,32 @@ export async function extract(url: string): Promise<ExtractResponse> {
     body: JSON.stringify({ url }),
   });
   if (!res.ok) {
-    throw new Error(`Failed to extract data: ${res.statusText}`);
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to extract data: ${res.statusText}`);
   }
   const data = await res.json();
   return {
     url: data.source_url || url,
     vendor: data.vendor,
     raw_text: data.raw_text,
+    images: data.images ?? [],
   };
+}
+
+/** Send image URLs to the backend EasyOCR scanner. Returns per-image scan results. */
+export async function scanImages(urls: string[]): Promise<ImageScanResult[]> {
+  if (urls.length === 0) return [];
+  const res = await fetch(`${API_BASE_URL}/images/scan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ urls }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to scan images: ${res.statusText}`);
+  }
+  const data = await res.json();
+  return data.results as ImageScanResult[];
 }
 
 export async function generate(input: {
@@ -174,10 +202,11 @@ export async function suggestCategory(
   return res.json();
 }
 
-/** Publish the product to Zoho, optionally with a specific category_id. */
+/** Publish the product to Zoho, optionally with a specific category_id and approved images. */
 export async function publish(
   product_id: string,
-  category_id?: string | null
+  category_id?: string | null,
+  approved_image_urls?: string[],
 ): Promise<{
   success: boolean;
   product_id?: string;
@@ -185,11 +214,15 @@ export async function publish(
   category_id?: string | null;
   message?: string;
   result?: any;
+  image_uploads?: any[];
 }> {
   const res = await fetch(`${API_BASE_URL}/publish/${product_id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ category_id: category_id ?? null }),
+    body: JSON.stringify({
+      category_id: category_id ?? null,
+      approved_image_urls: approved_image_urls ?? [],
+    }),
   });
   if (!res.ok) {
     let errorMessage = res.statusText;

@@ -31,6 +31,9 @@ function PipelinePage() {
   const [productId, setProductId] = useState<string | null>(null);
   const [data, setData] = useState<ProductData | null>(null);
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  // Image pipeline state
+  const [scrapedImages, setScrapedImages] = useState<string[]>([]);
+  const [approvedImages, setApprovedImages] = useState<string[]>([]);
 
   const uid = useId();
   const pipelineId = useMemo(
@@ -45,6 +48,8 @@ function PipelinePage() {
     setProductId(null);
     setData(null);
     setCategoryId(null);
+    setScrapedImages([]);
+    setApprovedImages([]);
     setStep("extract");
   }
 
@@ -66,6 +71,7 @@ function PipelinePage() {
                 setUrl(v.url);
                 setVendor(v.vendor);
                 setRawText(v.raw_text);
+                setScrapedImages(v.images ?? []);
                 setStep("generate");
               }}
             />
@@ -75,11 +81,13 @@ function PipelinePage() {
               source={{ vendor, source_url: url, raw_text: rawText }}
               initialData={data}
               initialProductId={productId}
+              scrapedImages={scrapedImages}
               onProductId={setProductId}
-              onApprove={(d, pid, catId) => {
+              onApprove={(d, pid, catId, approvedImgs) => {
                 setData(d);
                 setProductId(pid);
                 setCategoryId(catId);
+                setApprovedImages(approvedImgs);
                 setStep("publish");
               }}
             />
@@ -89,6 +97,7 @@ function PipelinePage() {
               productId={productId}
               productTitle={data.product_title}
               categoryId={categoryId}
+              approvedImages={approvedImages}
               onReset={reset}
             />
           )}

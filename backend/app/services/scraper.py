@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from pydantic import HttpUrl
 
 from app.core.config import settings
+from app.services.image_scanner import ImageExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -301,16 +302,24 @@ class ScraperService:
     # ── Public API ─────────────────────────────────────────────────────────────
 
     def extract(self, url: HttpUrl) -> dict:
-        """Fetch a product page and return `{raw_text, vendor, source_url, text_length}`."""
+        """Fetch a product page and return raw text, vendor, source URL, and product images."""
 
         response = self._fetch(str(url))
+        html = response.text
 
-        raw_text = self._extractor.sanitize_text(self._extractor.html_to_text(response.text))
+        raw_text = self._extractor.sanitize_text(self._extractor.html_to_text(html))
         if len(raw_text) < settings.min_scraped_text_chars:
             raise HTTPException(
                 status_code=422,
                 detail="Page returned too little text - it may be behind a login or JS-rendered.",
             )
+
+        # Extract product images from the vendor page (best-effort — never fail the request)
+        try:
+            images = ImageExtractor.extract(html, base_url=str(url))
+        except Exception as exc:
+            logger.warning("Image extraction failed for %s: %s", url, exc)
+            images = []
 
         vendor = self._detector.detect(url)
         return {
@@ -318,6 +327,7 @@ class ScraperService:
             "vendor": vendor,
             "source_url": str(url),
             "text_length": len(raw_text),
+            "images": images,
         }
 
 
