@@ -133,11 +133,12 @@ class GenerateResponse(BaseModel):
 
 
 class StatusResponse(BaseModel):
-    """Polling response for product generation status."""
+    """Response returned by GET /status/{product_id}."""
 
     status: ProductStatus
-    data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    status_message: Optional[str] = None
+    data: Optional[AIProduct] = None
 
 
 class SellingPrice(BaseModel):

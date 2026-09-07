@@ -34,9 +34,9 @@ export type ProductData = {
 };
 
 export type StatusResponse =
-  | { status: "PROCESSING"; data: null; error: null }
-  | { status: "COMPLETE"; data: ProductData; error: null }
-  | { status: "ERROR"; data: null; error: string };
+  | { status: "PROCESSING"; data: null; error: null; status_message?: string }
+  | { status: "COMPLETE"; data: ProductData; error: null; status_message?: string }
+  | { status: "ERROR"; data: null; error: string; status_message?: string };
 
 /** A single Zoho category node — may have nested children. */
 export type CategoryNode = {
@@ -158,16 +158,23 @@ export async function getStatus(product_id: string): Promise<StatusResponse> {
         long_description_html: aiData.long_description_html || "",
       },
       error: null,
+      status_message: backendData.status_message,
     };
   } else if (backendData.status === "failed" || backendData.status === "error") {
     return {
       status: "ERROR",
       data: null,
       error: backendData.error || "Generation failed",
+      status_message: backendData.status_message,
     };
   }
 
-  return { status: "PROCESSING", data: null, error: null };
+  return { 
+    status: "PROCESSING", 
+    data: null, 
+    error: null,
+    status_message: backendData.status_message 
+  };
 }
 
 /** Fetch the full Zoho category tree. Pass refresh=true to bust the server cache. */
