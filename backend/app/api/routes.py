@@ -17,6 +17,9 @@ from app.models.product import (
     ExtractResponse,
     GenerateRequest,
     GenerateResponse,
+    ImageScanRequest,
+    ImageScanResponse,
+    ImageScanResultModel,
     ProductStatus,
     PublishRequest,
     RawProductData,
@@ -25,6 +28,7 @@ from app.models.product import (
 from app.repositories.product_repository import repository
 from app.services.scraper import HtmlTextExtractor, scraper_service
 from app.services.publisher import publisher
+from app.services.image_scanner import image_scanner, ZohoImageUploader
 from app.services.zoho_categories import zoho_category_service
 from app.services.zoho_brands import zoho_brand_service
 from app.services.zoho_custom_fields import zoho_custom_field_service
@@ -38,13 +42,56 @@ router = APIRouter()
 
 @router.post("/extract", response_model=ExtractResponse)
 def extract_website(data: ExtractRequest, request: Request) -> ExtractResponse:
-    """Fetch a supplier URL and return sanitized text for user review."""
+    """Fetch a supplier URL and return sanitized text + product image URLs."""
 
     rate_limiter.check(
         client_key(request),
         LimitPolicy("extract", settings.rate_limit_extract_per_minute, 60),
     )
-    return ExtractResponse(**scraper_service.extract(data.url))
+    result = scraper_service.extract(data.url)
+    return ExtractResponse(**result)
+
+
+# ── Image Scanning ───────────────────────────────────────────────────────────
+
+@router.post("/images/scan", response_model=ImageScanResponse)
+def scan_images(data: ImageScanRequest, request: Request) -> ImageScanResponse:
+    """Run EasyOCR watermark detection on a list of image URLs.
+
+    Downloads each image on the server (Render) and scans it with EasyOCR.
+    Returns per-image flagged/clean results so the frontend can display a
+    colour-coded review grid. Flagged images have red borders; clean images
+    have green borders. The user can toggle any image before approving.
+
+    Note: EasyOCR model weights (~100 MB) are loaded on first call.
+    Subsequent calls are fast. Expect ~1–3 seconds per image on Render CPU.
+    """
+    rate_limiter.check(
+        client_key(request),
+        LimitPolicy("extract", settings.rate_limit_extract_per_minute, 60),
+    )
+
+    if len(data.urls) > 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 images per scan.")
+
+    raw_results = image_scanner.scan_all(data.urls)
+    results = [
+        ImageScanResultModel(
+            url=r.url,
+            flagged=r.flagged,
+            matches=r.matches,
+            ocr_texts=r.ocr_texts,
+            error=r.error,
+        )
+        for r in raw_results
+    ]
+    flagged = sum(1 for r in results if r.flagged)
+    return ImageScanResponse(
+        results=results,
+        total=len(results),
+        flagged_count=flagged,
+        clean_count=len(results) - flagged,
+    )
 
 
 # ── AI Generation ─────────────────────────────────────────────────────────────
@@ -182,9 +229,12 @@ def publish_product(
 ) -> dict:
     """Publish a completed AI product to Zoho or return a dry-run payload.
 
-    Optionally accepts a JSON body: {"category_id": "123456789"}.
-    If category_id is provided it is included in the Zoho payload and saved
-    in the publish audit log.
+    Optionally accepts a JSON body:
+        {"category_id": "123456789", "approved_image_urls": ["https://..."]}
+
+    After the product is created in Zoho, any approved_image_urls are
+    downloaded from the vendor and re-uploaded to Zoho via multipart upload
+    so no vendor CDN links appear in the store.
     """
 
     import datetime
@@ -227,6 +277,7 @@ def publish_product(
     year_str = f"{year1}{year2}"
     
     max_retries = 5
+    result = None
     for attempt in range(max_retries):
         if attempt == 0:
             sku_str = ai_data.get("sku")
@@ -254,6 +305,33 @@ def publish_product(
                 continue
             raise HTTPException(status_code=400, detail=f"Failed to publish to Zoho: {error_msg}")
 
+    # ── Upload approved images to Zoho (download from vendor + re-upload) ───────────
+    image_upload_results: list[dict] = []
+    zoho_product_id = result.get("zoho_product_id", "") if result else ""
+
+    if body.approved_image_urls and zoho_product_id and not settings.test_mode:
+        try:
+            from app.zoho import ZohoAuth
+            auth = ZohoAuth()
+            uploader = ZohoImageUploader(auth)
+            image_upload_results = uploader.upload_batch(zoho_product_id, body.approved_image_urls)
+            import logging as _logging
+            _logging.getLogger(__name__).info(
+                "Uploaded %d/%d images to Zoho product %s",
+                sum(1 for r in image_upload_results if r.get("success")),
+                len(image_upload_results),
+                zoho_product_id,
+            )
+        except Exception as exc:
+            # Image upload failure must NOT fail the overall publish — log and continue
+            import logging as _logging
+            _logging.getLogger(__name__).warning("Image upload batch failed: %s", exc)
+    elif body.approved_image_urls and settings.test_mode:
+        image_upload_results = [
+            {"url": u, "success": True, "zoho_image": {"image_id": f"TEST-IMG-{i}"}, "test_mode": True}
+            for i, u in enumerate(body.approved_image_urls)
+        ]
+
     # Save audit trail (best-effort — never fail the request because of this)
     repository.save_publish_result(
         raw_product_id=product_id,
@@ -262,13 +340,13 @@ def publish_product(
         test_mode=settings.test_mode,
     )
 
-    zoho_product_id = result.get("zoho_product_id", "")
     return {
         "success": True,
         "zoho_product_id": zoho_product_id,
         "zoho_id": zoho_product_id,  # kept for frontend compat
         "category_id": body.category_id,
         "result": result,
+        "image_uploads": image_upload_results,
     }
 
 

@@ -61,6 +61,7 @@ class PublishRequest(BaseModel):
     """Optional request body for POST /publish/{product_id}."""
 
     category_id: Optional[str] = None
+    approved_image_urls: List[str] = Field(default_factory=list)
 
 
 class ProductStatus(str, Enum):
@@ -93,6 +94,32 @@ class ExtractResponse(BaseModel):
     vendor: str
     source_url: str
     text_length: int
+    images: List[str] = Field(default_factory=list)
+
+
+class ImageScanRequest(BaseModel):
+    """Request body for POST /images/scan."""
+
+    urls: List[str] = Field(min_length=1)
+
+
+class ImageScanResultModel(BaseModel):
+    """Per-image OCR watermark scan result."""
+
+    url: str
+    flagged: bool = False            # True → watermark detected, show red
+    matches: List[str] = Field(default_factory=list)    # which keywords matched
+    ocr_texts: List[str] = Field(default_factory=list)  # all OCR-detected strings
+    error: Optional[str] = None      # non-None → could not be downloaded/scanned
+
+
+class ImageScanResponse(BaseModel):
+    """Response for POST /images/scan."""
+
+    results: List[ImageScanResultModel]
+    total: int
+    flagged_count: int
+    clean_count: int
 
 
 class GenerateResponse(BaseModel):

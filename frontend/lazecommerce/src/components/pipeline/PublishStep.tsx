@@ -7,11 +7,13 @@ export function PublishStep({
   productId,
   productTitle,
   categoryId,
+  approvedImages,
   onReset,
 }: {
   productId: string;
   productTitle: string;
   categoryId: string | null;
+  approvedImages: string[];
   onReset: () => void;
 }) {
   const [done, setDone] = useState(false);
@@ -25,7 +27,7 @@ export function PublishStep({
     started.current = true;
     (async () => {
       try {
-        const r = await publish(productId, categoryId);
+        const r = await publish(productId, categoryId, approvedImages);
         setZohoId(r.zoho_id ?? null);
         setDone(true);
         const burst = (originX: number) =>
