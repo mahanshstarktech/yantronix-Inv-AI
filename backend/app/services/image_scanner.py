@@ -105,12 +105,11 @@ class ImageExtractor:
             ext = parsed.path.rsplit(".", 1)[-1].lower()
             if f".{ext}" not in _IMAGE_EXTS and "?" not in u:
                 # allow URLs without extensions only when they have a path
-                # (some CDNs serve images without .jpg extension)
                 if not parsed.path or parsed.path == "/":
                     continue
             seen.add(u)
             result.append(u)
-        return result[:20]  # cap at 20 to avoid huge payloads
+        return result[:40]  # Increased cap since Gemini batches them efficiently
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
@@ -158,18 +157,44 @@ class ImageExtractor:
     def _from_img_tags(html: str, base_url: str) -> list[str]:
         soup = BeautifulSoup(html, "html.parser")
         urls: list[str] = []
-        for tag in soup.find_all("img"):
-            for attr in ("src", "data-src", "data-lazy-src", "data-original"):
-                src = tag.get(attr, "")
-                if not src or src.startswith("data:"):
-                    continue
-                if src.startswith("//"):
-                    src = "https:" + src
-                elif src.startswith("/") and base_url:
-                    src = urljoin(base_url, src)
-                if src.startswith("http"):
-                    urls.append(src)
-                    break
+        
+        # Look for a product-specific container first to avoid huge nav menus
+        containers = soup.select(
+            ".product-single, .product-gallery, .product-details, #product-photos, [id^='ProductSection'], .product-images, [data-section-type='product']"
+        )
+        
+        # If no container found, fallback to the entire body
+        targets = containers if containers else [soup]
+        
+        for target in targets:
+            for tag in target.find_all("img"):
+                # Try all possible source attributes, prioritising lazy-load ones
+                for attr in ("data-src", "data-lazy-src", "data-original", "src"):
+                    src = tag.get(attr, "")
+                    if not src or src.startswith("data:"):
+                        continue
+                        
+                    if src.startswith("//"):
+                        src = "https:" + src
+                    elif src.startswith("/") and base_url:
+                        src = urljoin(base_url, src)
+                        
+                    if src.startswith("http"):
+                        # Filter out obvious UI icons / logos
+                        lower_src = src.lower()
+                        if any(junk in lower_src for junk in ["logo", "icon", "banner", "badge", "avatar"]):
+                            continue
+                            
+                        # If the image has a width set via HTML, skip tiny ones
+                        width = tag.get("width", "")
+                        try:
+                            if width and int(width) < 100:
+                                continue
+                        except ValueError:
+                            pass
+                            
+                        urls.append(src)
+                        break
         return urls
 
 
