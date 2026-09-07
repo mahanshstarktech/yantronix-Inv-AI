@@ -46,6 +46,7 @@ export function GenerateStep({
   const [productId, setProductId] = useState<string | null>(initialProductId);
   const [data, setData] = useState<ProductData | null>(initialData);
   const [activeTab, setActiveTab] = useState<"long" | "short">("long");
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const startedRef = useRef(false);
 
   // Category state
@@ -95,6 +96,10 @@ export function GenerateStep({
           setPhase("review");
           // Fetch categories + suggest in parallel after generation is done
           loadCategories(s.data);
+        } else if (s.status === "PROCESSING") {
+          if (s.status_message) {
+            setStatusMessage(s.status_message);
+          }
         } else if (s.status === "ERROR") {
           import("sonner").then(({ toast }) => toast.error(s.error || "AI generation failed"));
           setPhase("submitting");
@@ -206,7 +211,7 @@ export function GenerateStep({
   }
 
   if (phase !== "review" || !data) {
-    return <ProcessingPanel />;
+    return <ProcessingPanel statusMessage={statusMessage} />;
   }
 
   const approvedImageUrls = imageScanResults
@@ -261,7 +266,7 @@ function buildBreadcrumbFromFlat(categoryId: string, flat: CategoryNode[]): stri
 
 // ── Processing panel ──────────────────────────────────────────────────────────
 
-function ProcessingPanel() {
+function ProcessingPanel({ statusMessage }: { statusMessage: string | null }) {
   const [lineIdx, setLineIdx] = useState(0);
   useEffect(() => {
     const id = setInterval(
@@ -305,14 +310,14 @@ function ProcessingPanel() {
         <div className="h-6">
           <AnimatePresence mode="wait">
             <motion.p
-              key={lineIdx}
+              key={statusMessage || lineIdx}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.3 }}
               className="font-mono text-xs text-zinc-400"
             >
-              {PROCESSING_LINES[lineIdx]}
+              {statusMessage || PROCESSING_LINES[lineIdx]}
             </motion.p>
           </AnimatePresence>
         </div>

@@ -55,6 +55,7 @@ class ProductRepository:
             "vendor": product.vendor,
             "status": ProductStatus.QUEUED.value,
             "error_message": None,
+            "status_message": None,
             "data": product.as_mongo(),
             "created_at": now,
             "updated_at": now,
@@ -135,19 +136,24 @@ class ProductRepository:
         product_id: str,
         status: ProductStatus,
         error_message: Optional[str] = None,
+        status_message: Optional[str] = None,
     ) -> None:
-        """Update product processing status and optional failure reason."""
+        """Update product processing status and optional failure/status reason."""
+
+        update_fields: Dict[str, Any] = {
+            "status": status.value,
+            "updated_at": datetime.now(timezone.utc),
+        }
+        if error_message is not None:
+            update_fields["error_message"] = error_message
+        if status_message is not None:
+            update_fields["status_message"] = status_message
 
         self.raw_products.update_one(
             {"_id": ObjectId(product_id)},
-            {
-                "$set": {
-                    "status": status.value,
-                    "error_message": error_message,
-                    "updated_at": datetime.now(timezone.utc),
-                }
-            },
+            {"$set": update_fields},
         )
+
 
     def _find_raw_doc(self, product_id: str) -> Optional[Dict[str, Any]]:
         """Find a raw product document, safely handling invalid ObjectIds."""

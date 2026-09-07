@@ -143,7 +143,11 @@ def get_status(product_id: str) -> StatusResponse:
     raw_doc = repository.get_raw_document(product_id)
     if raw_doc:
         status = ProductStatus(raw_doc.get("status", ProductStatus.PROCESSING.value))
-        return StatusResponse(status=status, error=raw_doc.get("error_message"))
+        return StatusResponse(
+            status=status, 
+            error=raw_doc.get("error_message"),
+            status_message=raw_doc.get("status_message")
+        )
 
     raise HTTPException(status_code=404, detail="Product not found")
 
