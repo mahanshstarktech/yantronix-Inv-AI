@@ -125,36 +125,24 @@ export function GenerateStep({
     }
   }, []);
 
-  // Trigger image scan when review phase starts (only once)
-  useEffect(() => {
-    if (phase !== "review" || imageScanStartedRef.current || scrapedImages.length === 0) return;
-    imageScanStartedRef.current = true;
-    (async () => {
-      setImageScanning(true);
-      setImageScanError(null);
-      try {
-        const results = await scanImages(scrapedImages);
-        setImageScanResults(results);
-        // Initialise toggle state: flagged → rejected, clean → approved
-        const initial: Record<string, "approved" | "rejected"> = {};
-        for (const r of results) {
-          initial[r.url] = r.flagged ? "rejected" : "approved";
-        }
-        setImageStates(initial);
-      } catch (err: any) {
-        setImageScanError(err.message || "Image scan failed");
-      } finally {
-        setImageScanning(false);
+  async function startImageScan() {
+    setImageScanning(true);
+    setImageScanError(null);
+    try {
+      const results = await scanImages(scrapedImages);
+      setImageScanResults(results);
+      // Initialise toggle state: flagged → rejected, clean → approved
+      const initial: Record<string, "approved" | "rejected"> = {};
+      for (const r of results) {
+        initial[r.url] = r.flagged ? "rejected" : "approved";
       }
-    })();
-  }, [phase, scrapedImages]);
-
-  // If initialData + images already present, kick off scan immediately
-  useEffect(() => {
-    if (initialData && phase === "review" && categoryFlat.length === 0) {
-      loadCategories(initialData);
+      setImageStates(initial);
+    } catch (err: any) {
+      setImageScanError(err.message || "Image scan failed");
+    } finally {
+      setImageScanning(false);
     }
-  }, []);
+  }
 
   async function loadCategories(product: ProductData) {
     setCategoryLoading(true);
@@ -207,6 +195,11 @@ export function GenerateStep({
       );
     } finally {
       setCategoryLoading(false);
+      // Trigger image scan sequentially AFTER categories load to prevent backend OOM
+      if (!imageScanStartedRef.current && scrapedImages.length > 0) {
+        imageScanStartedRef.current = true;
+        startImageScan();
+      }
     }
   }
 
@@ -244,6 +237,7 @@ export function GenerateStep({
         }))
       }
       onApprove={() => onApprove(data, productId!, selectedCategory?.category_id ?? null, approvedImageUrls)}
+      onRetryImageScan={startImageScan}
     />
   );
 }
@@ -357,6 +351,7 @@ function ReviewDashboard({
   imageScanError,
   onToggleImage,
   onApprove,
+  onRetryImageScan,
 }: {
   data: ProductData;
   onChange: (d: ProductData) => void;
@@ -377,6 +372,7 @@ function ReviewDashboard({
   imageScanError: string | null;
   onToggleImage: (url: string) => void;
   onApprove: () => void;
+  onRetryImageScan: () => void;
 }) {
   const set = <K extends keyof ProductData>(k: K, v: ProductData[K]) =>
     onChange({ ...data, [k]: v });
@@ -654,6 +650,7 @@ function ReviewDashboard({
               scanning={imageScanning}
               scanError={imageScanError}
               onToggle={onToggleImage}
+              onRetry={onRetryImageScan}
             />
           </div>
         </div>
@@ -776,12 +773,14 @@ function ImageReviewPanel({
   scanning,
   scanError,
   onToggle,
+  onRetry,
 }: {
   results: ImageScanResult[];
   states: Record<string, "approved" | "rejected">;
   scanning: boolean;
   scanError: string | null;
   onToggle: (url: string) => void;
+  onRetry?: () => void;
 }) {
   // If no images were scraped at all, don't render the panel
   if (!scanning && results.length === 0 && !scanError) return null;
@@ -841,8 +840,18 @@ function ImageReviewPanel({
 
         {/* Error */}
         {scanError && !scanning && (
-          <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-red-400 font-mono">
-            ⚠ Image scan failed: {scanError}
+          <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-between">
+            <span className="text-sm text-red-400 font-mono">
+              ⚠ Image scan failed: {scanError}
+            </span>
+            {onRetry && (
+              <button
+                onClick={onRetry}
+                className="px-3 py-1.5 rounded-md bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs font-mono font-bold transition-colors"
+              >
+                RETRY SCAN
+              </button>
+            )}
           </div>
         )}
 
