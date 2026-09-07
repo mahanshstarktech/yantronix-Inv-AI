@@ -48,8 +48,6 @@ WATERMARK_KEYWORDS: list[str] = [
     "robu india",
 ]
 
-    "robu india",
-]
 
 # ── Data model ────────────────────────────────────────────────────────────────
 
