@@ -94,21 +94,48 @@ class ImageExtractor:
         urls.extend(cls._from_og(html))
         urls.extend(cls._from_img_tags(html, base_url))
 
-        # Deduplicate preserving order, keep only recognised image extensions
+        # Words that indicate UI icons or banners, not product photos
+        junk_words = ["logo", "icon", "banner", "badge", "avatar", "shipping", "support", "return", "cod", "bulk", "discount"]
+
+        # Regex to strip Shopify image size suffixes like _large, _grande, _1024x1024
+        shopify_suffix_re = re.compile(r"(_(small|compact|medium|large|grande|master|original|\d+x\d+(_crop_.*)?))(\.[a-zA-Z0-9]+)(\?.*)?$")
+
         seen: set[str] = set()
         result: list[str] = []
+        
         for u in urls:
             u = u.strip()
-            if not u or u in seen:
+            if not u:
                 continue
+                
+            # Filter obvious junk globally
+            lower_u = u.lower()
+            if any(junk in lower_u for junk in junk_words):
+                continue
+                
             parsed = urlparse(u)
             ext = parsed.path.rsplit(".", 1)[-1].lower()
             if f".{ext}" not in _IMAGE_EXTS and "?" not in u:
                 # allow URLs without extensions only when they have a path
                 if not parsed.path or parsed.path == "/":
                     continue
-            seen.add(u)
+                    
+            # Normalize URL for deduplication by stripping query params and Shopify size suffixes
+            base_url_only = u.split("?")[0]
+            normalized = shopify_suffix_re.sub(r"\4", base_url_only).lower()
+            
+            # Additional deduplication for Quartz specifically where they upload multiple identical images
+            # with slightly different hyphenation (e.g. UNI-T_UTL8212 vs UNI-TUTL8212)
+            # We strip non-alphanumeric chars from the filename to compare
+            filename = normalized.split("/")[-1]
+            simplified_filename = re.sub(r'[^a-z0-9]', '', filename)
+            
+            if simplified_filename in seen:
+                continue
+                
+            seen.add(simplified_filename)
             result.append(u)
+            
         return result[:40]  # Increased cap since Gemini batches them efficiently
 
     # ── Private helpers ───────────────────────────────────────────────────────
@@ -180,9 +207,9 @@ class ImageExtractor:
                         src = urljoin(base_url, src)
                         
                     if src.startswith("http"):
-                        # Filter out obvious UI icons / logos
+                        # Filter out obvious UI icons / logos (globally filtered too, but saves processing)
                         lower_src = src.lower()
-                        if any(junk in lower_src for junk in ["logo", "icon", "banner", "badge", "avatar"]):
+                        if any(junk in lower_src for junk in ["logo", "icon", "banner", "badge", "avatar", "shipping", "support", "return", "cod", "bulk"]):
                             continue
                             
                         # If the image has a width set via HTML, skip tiny ones
