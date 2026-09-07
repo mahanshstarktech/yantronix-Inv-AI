@@ -30,7 +30,10 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from rapidfuzz import fuzz
+from pydantic import BaseModel
+from google import genai
+from google.genai import types
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +48,8 @@ WATERMARK_KEYWORDS: list[str] = [
     "robu india",
 ]
 
-# Fuzzy similarity threshold (0–100).  82 catches typo/OCR near-misses while
-# avoiding false positives from product text that legitimately mentions quartz.
-FUZZ_THRESHOLD = 82
+    "robu india",
+]
 
 # ── Data model ────────────────────────────────────────────────────────────────
 
@@ -60,23 +62,14 @@ class ImageScanResult:
     error: Optional[str] = None  # non-None → image could not be downloaded/scanned
 
 
-# ── Lazy EasyOCR reader ───────────────────────────────────────────────────────
+# ── Pydantic Schemas for Gemini ───────────────────────────────────────────────
 
-_reader = None  # initialised on first use
+class ImageWatermarkScan(BaseModel):
+    has_watermark: bool
+    matched_keywords: list[str]
 
-def _get_reader():
-    """Return the EasyOCR Reader singleton, creating it on first call."""
-    global _reader
-    if _reader is None:
-        try:
-            import easyocr  # type: ignore
-            logger.info("Initialising EasyOCR Reader (first call — may take ~10–20 s)…")
-            _reader = easyocr.Reader(["en"], gpu=False, verbose=False)
-            logger.info("EasyOCR Reader ready.")
-        except Exception as exc:
-            logger.error("Failed to initialise EasyOCR: %s", exc)
-            raise RuntimeError(f"EasyOCR unavailable: {exc}") from exc
-    return _reader
+class BatchWatermarkResponse(BaseModel):
+    results: list[ImageWatermarkScan]
 
 
 # ── ImageExtractor ─────────────────────────────────────────────────────────────
@@ -195,51 +188,84 @@ class ImageScannerService:
     Download images and run EasyOCR watermark detection on the Render server.
     """
 
-    def scan_url(self, url: str) -> ImageScanResult:
-        """Download one image, OCR it, return a flagged/clean result."""
-        result = ImageScanResult(url=url)
-        try:
-            resp = requests.get(url, headers=_DOWNLOAD_HEADERS, timeout=15)
-            resp.raise_for_status()
-            image_bytes = resp.content
-        except Exception as exc:
-            result.error = f"Download failed: {exc}"
-            return result
-
-        try:
-            reader = _get_reader()
-            # EasyOCR accepts bytes directly
-            ocr_output = reader.readtext(image_bytes, detail=1)
-        except Exception as exc:
-            result.error = f"OCR failed: {exc}"
-            return result
-
-        texts: list[str] = []
-        matched_keywords: list[str] = []
-
-        for (_bbox, text, _conf) in ocr_output:
-            cleaned = text.strip().lower()
-            if not cleaned:
-                continue
-            texts.append(text)
-            for keyword in WATERMARK_KEYWORDS:
-                score = fuzz.partial_ratio(cleaned, keyword)
-                if score >= FUZZ_THRESHOLD:
-                    if keyword not in matched_keywords:
-                        matched_keywords.append(keyword)
-                    logger.debug("Watermark match: '%s' ~ '%s' (score=%d)", text, keyword, score)
-
-        result.ocr_texts = texts
-        result.matches = matched_keywords
-        result.flagged = len(matched_keywords) > 0
-        return result
-
     def scan_all(self, urls: list[str]) -> list[ImageScanResult]:
-        """Scan a list of image URLs sequentially. Returns results in same order."""
+        """Download images and scan them in a single batch using Gemini."""
+        if not urls:
+            return []
+
+        # Download all images
+        images_data = []
         results: list[ImageScanResult] = []
+        
         for url in urls:
-            logger.info("Scanning image: %s", url)
-            results.append(self.scan_url(url))
+            result = ImageScanResult(url=url)
+            try:
+                resp = requests.get(url, headers=_DOWNLOAD_HEADERS, timeout=15)
+                resp.raise_for_status()
+                images_data.append((url, resp.content))
+            except Exception as exc:
+                result.error = f"Download failed: {exc}"
+                images_data.append((url, None))
+            results.append(result)
+
+        valid_images = [(u, b) for u, b in images_data if b is not None]
+        if not valid_images:
+            return results
+
+        # Process valid images with Gemini in one batch
+        try:
+            client = genai.Client(api_key=settings.gemini_api_key)
+            
+            prompt_parts = [
+                f"You are a watermark detection AI. I am providing {len(valid_images)} product images in order. "
+                f"For each image, check if it contains any of these specific watermark texts: {', '.join(WATERMARK_KEYWORDS)}. "
+                "Look closely at the corners, background, and center of the images for these vendor names. "
+                "Reply with a JSON object containing a 'results' array with exactly one entry for each image IN THE EXACT SAME ORDER."
+            ]
+            
+            for _, img_bytes in valid_images:
+                prompt_parts.append(types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"))
+
+            response = client.models.generate_content(
+                model=settings.gemini_model,
+                contents=prompt_parts,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=BatchWatermarkResponse,
+                    temperature=0.1,
+                ),
+            )
+
+            if not response.text:
+                raise RuntimeError("Empty response from Gemini")
+                
+            batch_result = BatchWatermarkResponse.model_validate_json(response.text)
+            
+            if len(batch_result.results) != len(valid_images):
+                logger.warning(
+                    f"Gemini returned {len(batch_result.results)} results, expected {len(valid_images)}"
+                )
+            
+            # Map results back
+            valid_idx = 0
+            for i, (url, b) in enumerate(images_data):
+                if b is None:
+                    continue  # already has error
+                if valid_idx < len(batch_result.results):
+                    scan = batch_result.results[valid_idx]
+                    results[i].flagged = scan.has_watermark
+                    results[i].matches = scan.matched_keywords
+                    results[i].ocr_texts = [] # Not used by Gemini
+                else:
+                    results[i].error = "Gemini scan failed: Missing result in batch"
+                valid_idx += 1
+
+        except Exception as exc:
+            logger.error("Gemini OCR failed: %s", exc)
+            for res in results:
+                if not res.error:
+                    res.error = f"AI scan failed: {exc}"
+                    
         return results
 
 
